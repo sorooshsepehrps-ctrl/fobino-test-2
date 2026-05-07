@@ -1,0 +1,27 @@
+// Export all models
+module.exports = {
+  User: require('./User'),
+  Post: require('./Post'),
+  Category: require('./Category'),
+  Subscription: require('./Subscription'),
+  Chat: require('./Chat'),
+  Message: require('./Message'),
+  Offer: require('./Offer'),
+  Deal: require('./Deal'),
+  UserReview: require('./UserReview'),
+  Wallet: require('./Wallet'),
+  Transaction: require('./Transaction'),
+  Dispute: require('./Dispute'),
+  Ticket: require('./Ticket'),
+  Notification: require('./Notification'),
+  Invitation: require('./Invitation'),
+  VerificationRequest: require('./VerificationRequest'),
+  Producer: require('./Producer'),
+  ExchangeRate: require('./ExchangeRate'),
+  AdminLog: require('./AdminLog'),
+  Shipping: require('./Shipping'),
+  Inspection: require('./Inspection'),
+  MarketingRequest: require('./MarketingRequest'),
+  RFP: require('./RFP'),
+  TradeContract: require('./TradeContract')
+};
