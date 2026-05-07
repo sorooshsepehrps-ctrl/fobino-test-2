@@ -20,7 +20,19 @@ const subscriptionSchema = new mongoose.Schema({
     accessToBuyPosts: Number, // -1 for unlimited
     maxOffersVisible: Number,
     maxChatsPerPost: Number,
+    consultationOnlineIncludedMinutes: { type: Number, default: 0 },
+    consultationInPersonEligible: { type: Boolean, default: false },
+    badge: String,
     features: [String]
+  },
+
+  // Consultation quota is reserved first to avoid double-spending free hours.
+  consultationQuota: {
+    onlineIncludedMinutes: { type: Number, default: 0 },
+    onlineReservedMinutes: { type: Number, default: 0 },
+    onlineConsumedMinutes: { type: Number, default: 0 },
+    onlineReleasedMinutes: { type: Number, default: 0 },
+    inPersonEligible: { type: Boolean, default: false }
   },
   
   // Status
@@ -109,6 +121,21 @@ subscriptionSchema.virtual('remainingDays').get(function() {
   return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
 });
 
+// Virtual for remaining online consultation minutes
+subscriptionSchema.virtual('remainingOnlineConsultationMinutes').get(function() {
+  const quota = this.consultationQuota || {};
+  const included = quota.onlineIncludedMinutes || 0;
+  const reserved = quota.onlineReservedMinutes || 0;
+  const consumed = quota.onlineConsumedMinutes || 0;
+  const released = quota.onlineReleasedMinutes || 0;
+  return Math.max(0, included - reserved - consumed + released);
+});
+
+// Virtual for remaining whole online consultation hours
+subscriptionSchema.virtual('remainingOnlineConsultationHours').get(function() {
+  return Math.floor(this.remainingOnlineConsultationMinutes / 60);
+});
+
 // Virtual for remaining sell posts
 subscriptionSchema.virtual('remainingSellPosts').get(function() {
   if (this.planDetails.sellPosts === -1) return -1; // unlimited
@@ -131,7 +158,7 @@ subscriptionSchema.virtual('remainingAccessToBuyPosts').get(function() {
 
 // Check if subscription is active
 subscriptionSchema.methods.isActive = function() {
-  return this.status === 'active' && this.endDate > new Date();
+  return this.status === 'active' && (!this.endDate || this.endDate > new Date());
 };
 
 subscriptionSchema.methods.isProducerPlan = function() {
@@ -209,16 +236,26 @@ subscriptionSchema.statics.createFreeSubscription = async function(userId) {
       accessToBuyPosts: plan.accessToBuyPosts,
       maxOffersVisible: plan.maxOffersVisible,
       maxChatsPerPost: plan.maxChatsPerPost,
+      consultationOnlineIncludedMinutes: plan.consultationOnlineIncludedMinutes || 0,
+      consultationInPersonEligible: Boolean(plan.consultationInPersonEligible),
+      badge: plan.badge,
       features: plan.features
+    },
+    consultationQuota: {
+      onlineIncludedMinutes: plan.consultationOnlineIncludedMinutes || 0,
+      onlineReservedMinutes: 0,
+      onlineConsumedMinutes: 0,
+      onlineReleasedMinutes: 0,
+      inPersonEligible: Boolean(plan.consultationInPersonEligible)
     },
     status: 'active',
     startDate: new Date(),
-    endDate: new Date(Date.now() + plan.duration * 24 * 60 * 60 * 1000),
+    endDate: plan.duration === 0 ? null : new Date(Date.now() + plan.duration * 24 * 60 * 60 * 1000),
     payment: {
       amount: 0,
       currency: 'IRR',
       paidAt: new Date(),
-      paymentMethod: 'wallet'
+      paymentMethod: 'free'
     },
     usage: {
       lastResetDate: new Date()

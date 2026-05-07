@@ -55,16 +55,22 @@ const QUOTA_PRICES = {
   ACCESS_POSTS: 100000 // 10,000 Toman per contact
 };
 
-// Subscription Plans (Updated based on requirements)
+// Subscription Plans
+// Backend is the source of truth for purchasable plans. `free` remains an
+// internal fallback plan; only VIP and Producer are sold in the UI.
 const SUBSCRIPTION_PLANS = {
   FREE: {
     name: 'free',
     nameFa: 'رایگان',
     duration: 0, // Never expires
     price: 0,
+    isPurchasable: false,
     sellPosts: -1, // Unlimited
     buyPosts: -1, // Unlimited
     accessToBuyPosts: 5, // 5 contacts per month
+    consultationOnlineIncludedMinutes: 0,
+    consultationInPersonEligible: false,
+    badge: null,
     maxOffersVisible: 3,
     maxChatsPerPost: 5,
     features: [
@@ -78,44 +84,47 @@ const SUBSCRIPTION_PLANS = {
     name: 'vip',
     nameFa: 'ویژه',
     duration: 365, // 1 year
-    price: 5000000, // 500,000 Toman
+    price: 28000000, // 2,800,000 Toman (stored in IRR)
+    isPurchasable: true,
     sellPosts: -1, // Unlimited
     buyPosts: -1, // Unlimited
     accessToBuyPosts: 85, // 85 contacts per month
+    consultationOnlineIncludedMinutes: 20 * 60,
+    consultationInPersonEligible: false,
+    badge: 'vip',
     maxOffersVisible: 10,
     maxChatsPerPost: 20,
     features: [
-      'unlimited_posts',
       '85_contacts_per_month',
-      'priority_support',
-      'verified_badge',
-      'advanced_analytics',
-      'featured_posts'
+      'vip_badge',
+      '20_hours_online_consultation',
+      'priority_support'
     ]
   },
   PRODUCER: {
     name: 'producer',
     nameFa: 'تولیدکننده',
     duration: 365, // 1 year
-    price: 10000000, // 1,000,000 Toman
+    price: 100000000, // 10,000,000 Toman (stored in IRR)
+    isPurchasable: true,
     sellPosts: -1, // Unlimited
     buyPosts: -1, // Unlimited
     accessToBuyPosts: 85, // 85 contacts per month
+    consultationOnlineIncludedMinutes: 20 * 60,
+    consultationInPersonEligible: true,
+    badge: 'producer',
     maxOffersVisible: 20,
     maxChatsPerPost: 50,
     features: [
-      'unlimited_posts',
       '85_contacts_per_month',
       'producer_badge',
-      'producer_directory',
-      'annual_needs_planning',
-      'consultation_sessions',
-      'catalog_upload',
-      'priority_verification',
-      'dedicated_support'
+      '20_hours_online_consultation',
+      'in_person_consultation_request',
+      'producer_verification_flow'
     ]
   }
 };
+
 
 module.exports = {
   // App Info
@@ -124,13 +133,13 @@ module.exports = {
   COMPANY_NAME,
   SUPPORT_EMAIL,
   SUPPORT_PHONE,
-  
+
   // Environment
   NODE_ENV,
   IS_PRODUCTION,
   IS_DEVELOPMENT,
   IS_TEST,
-  
+
   // Server
   PORT,
   BASE_URL,
@@ -140,38 +149,38 @@ module.exports = {
   JWT_EXPIRE,
   JWT_REFRESH_SECRET,
   JWT_REFRESH_EXPIRE,
-  
+
   // Database
   MONGO_URI,
   REDIS_URL,
-  
+
   // File Upload
   MAX_FILE_SIZE,
   ALLOWED_FILE_TYPES,
   UPLOAD_PATH,
-  
+
   // External Services
   CLOUDINARY_CLOUD_NAME,
   CLOUDINARY_API_KEY,
   CLOUDINARY_API_SECRET,
   ZARINPAL_MERCHANT_ID,
   ZARINPAL_SANDBOX,
-  
+
   // SMS
   SMS_PROVIDER,
   SMS_API_KEY,
-  
+
   // Email
   EMAIL_HOST,
   EMAIL_PORT,
   EMAIL_USER,
   EMAIL_PASS,
   EMAIL_FROM,
-  
+
   // Subscription
   SUBSCRIPTION_PLANS,
   QUOTA_PRICES,
-  
+
   // User Levels
   USER_LEVELS: {
     BASIC: 0,           // ثبت‌نام اولیه

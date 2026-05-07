@@ -2,14 +2,40 @@ const cloudinary = require('../config/cloudinary');
 const logger = require('../utils/logger');
 
 class FileUploadService {
+  async uploadFile(file, folder, resourceType = 'auto', options = {}) {
+    if (!file) {
+      throw new Error('فایل نامعتبر است');
+    }
+
+    if (file.buffer) {
+      return cloudinary.uploadBuffer(file.buffer, folder, resourceType, options);
+    }
+
+    if (file.path) {
+      return file.mimetype?.startsWith('image/')
+        ? cloudinary.uploadImage(file.path, folder)
+        : cloudinary.uploadDocument(file.path, folder);
+    }
+
+    throw new Error('فایل مسیر یا بافر معتبر ندارد');
+  }
+
   // Upload product images
   async uploadPostImages(files, postId = null) {
     const results = [];
-    
+
     for (const file of files) {
       try {
-        const result = await cloudinary.uploadImage(file.path, 
-          postId ? `fobino/posts/${postId}` : 'fobino/posts/temp'
+        const result = await this.uploadFile(
+          file,
+          postId ? `fobino/posts/${postId}` : 'fobino/posts/temp',
+          'auto',
+          {
+            transformation: [
+              { quality: 'auto:good' },
+              { fetch_format: 'auto' }
+            ]
+          }
         );
         results.push(result);
       } catch (error) {
@@ -17,32 +43,35 @@ class FileUploadService {
         // Continue with other files if one fails
       }
     }
-    
+
     return results;
   }
-  
+
   // Upload certificate/document images
   async uploadCertificateImages(files, userId = null) {
     const results = [];
-    
+
     for (const file of files) {
       try {
-        const result = await cloudinary.uploadDocument(file.path,
-          userId ? `fobino/documents/${userId}` : 'fobino/documents/temp'
+        const result = await this.uploadFile(
+          file,
+          userId ? `fobino/documents/${userId}` : 'fobino/documents/temp',
+          'auto',
+          { access_mode: 'authenticated' }
         );
         results.push(result);
       } catch (error) {
         logger.error('Failed to upload certificate:', error);
       }
     }
-    
+
     return results;
   }
-  
+
   // Delete images
   async deleteImages(publicIds) {
     const results = [];
-    
+
     for (const publicId of publicIds) {
       try {
         const result = await cloudinary.deleteImage(publicId);
@@ -52,26 +81,33 @@ class FileUploadService {
         results.push({ publicId, success: false, error: error.message });
       }
     }
-    
+
     return results;
   }
-  
+
   // Get signed URL for protected images
   getSignedUrl(publicId, expiresInSeconds = 3600) {
     return cloudinary.getSignedUrl(publicId, expiresInSeconds);
   }
-  
+
   // Upload chat attachment
   async uploadChatAttachment(file, chatId) {
     const folder = `fobino/chats/${chatId}`;
-    
+
     try {
-      let result;
-      if (file.mimetype.startsWith('image/')) {
-        result = await cloudinary.uploadImage(file.path, folder);
-      } else {
-        result = await cloudinary.uploadDocument(file.path, folder);
-      }
+      const result = await this.uploadFile(
+        file,
+        folder,
+        'auto',
+        file.mimetype.startsWith('image/')
+          ? {
+              transformation: [
+                { quality: 'auto:good' },
+                { fetch_format: 'auto' }
+              ]
+            }
+          : { access_mode: 'authenticated' }
+      );
       return {
         url: result.url,
         publicId: result.publicId,
@@ -220,11 +256,11 @@ module.exports = new FileUploadService();
 //   // Upload chat attachment
 //   async uploadChatAttachment(file, chatId) {
 //     const folder = `chats/${chatId}`;
-    
+
 //     if (file.mimetype.startsWith('image/')) {
 //       return this.uploadImage(file, folder);
 //     }
-    
+
 //     return this.uploadDoc(file, folder);
 //   }
 
