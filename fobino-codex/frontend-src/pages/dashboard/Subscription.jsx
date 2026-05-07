@@ -1,67 +1,98 @@
-import { useEffect, useState } from 'react';
-import { Check, Crown, Sparkles, Building, Loader2 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { Button, Card, Modal } from '../../components/ui';
+import { Card } from '../../components/ui';
 import useAuthStore from '../../store/authStore';
 import { SUBSCRIPTION_PLANS as FALLBACK_SUBSCRIPTION_PLANS } from '../../config/constants';
-import { toPersianNumber, getDaysRemaining } from '../../utils/helpers';
-import { subscriptionService } from '../../services';
+import { getDaysRemaining } from '../../utils/helpers';
+import { subscriptionService, userService } from '../../services';
+import SubscriptionHero from '../../components/subscription/SubscriptionHero';
+import CurrentSubscriptionCard from '../../components/subscription/CurrentSubscriptionCard';
+import PlanComparisonGrid from '../../components/subscription/PlanComparisonGrid';
+import PurchaseSubscriptionModal from '../../components/subscription/PurchaseSubscriptionModal';
+import InsufficientWalletModal from '../../components/subscription/InsufficientWalletModal';
+import PaymentResultBanner from '../../components/subscription/PaymentResultBanner';
+import DiscardPurchaseModal from '../../components/subscription/DiscardPurchaseModal';
+import {
+  normalizeBackendPlan,
+  normalizeFallbackPlan,
+  PAYMENT_METHOD_LABELS,
+  PLAN_LABELS,
+} from '../../components/subscription/subscriptionUtils';
 
-const planIcons = {
-  vip: Sparkles,
-  producer: Building,
-};
-
-const planColors = {
-  vip: 'from-blue-700 to-indigo-700',
-  producer: 'from-blue-800 to-red-600',
-};
-
-const FEATURE_LABELS = {
-  '85_contacts_per_month': '۸۵ دسترسی رایگان به اطلاعات تماس در هر دوره مصرف',
-  vip_badge: 'نمایش نشان VIP در آگهی‌ها و بخش‌های عمومی',
-  producer_badge: 'نمایش نشان تولیدکننده با ۳ سطح ستاره‌ای پس از احراز',
-  '20_hours_online_consultation': '۲۰ ساعت مشاوره آنلاین رایگان',
-  in_person_consultation_request: 'امکان ثبت درخواست مشاوره حضوری',
-  producer_verification_flow: 'دسترسی به فلو احراز تولیدکننده',
-  priority_support: 'پشتیبانی اولویت‌دار',
-};
-
-const formatPrice = (price) => {
-  if (!price) return 'رایگان';
-  return `${toPersianNumber(Math.round(price / 10).toLocaleString('fa-IR'))} تومان`;
-};
-
-const normalizeBackendPlan = (plan) => ({
-  id: plan.name,
-  name: plan.nameFa || plan.name,
-  duration: `${toPersianNumber(plan.duration)} روزه`,
-  price: plan.price,
-  priceDisplay: formatPrice(plan.price),
-  features: (plan.features || []).map((feature) => FEATURE_LABELS[feature] || feature),
-  highlighted: plan.name === 'producer',
-  consultationOnlineIncludedMinutes: plan.consultationOnlineIncludedMinutes || 0,
-  consultationInPersonEligible: Boolean(plan.consultationInPersonEligible),
-});
+const PURCHASABLE_PLAN_IDS = ['vip', 'producer'];
 
 const getFallbackPlans = () => FALLBACK_SUBSCRIPTION_PLANS
-  .filter((plan) => ['vip', 'producer'].includes(plan.id))
-  .map((plan) => ({
-    ...plan,
-    features: plan.features?.filter(Boolean) || [],
-  }));
+  .filter((plan) => PURCHASABLE_PLAN_IDS.includes(plan.id))
+  .map(normalizeFallbackPlan);
+
+const getWalletAvailableBalance = (walletSummary, user) => {
+  if (typeof walletSummary?.available === 'number') return walletSummary.available;
+  if (typeof walletSummary?.balance?.available === 'number') return walletSummary.balance.available;
+  if (typeof user?.wallet?.balance === 'number') return user.wallet.balance;
+  if (typeof user?.wallet?.available === 'number') return user.wallet.available;
+  return 0;
+};
 
 export default function Subscription() {
-  const { user } = useAuthStore();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const plansRef = useRef(null);
+  const { user, fetchUser } = useAuthStore();
+
   const [plans, setPlans] = useState([]);
   const [loadingPlans, setLoadingPlans] = useState(true);
+  const [loadingOverview, setLoadingOverview] = useState(true);
+  const [currentSubscription, setCurrentSubscription] = useState(null);
+  const [subscriptionLimits, setSubscriptionLimits] = useState(null);
+  const [walletSummary, setWalletSummary] = useState(null);
   const [selectedPlan, setSelectedPlan] = useState(null);
-  const [paymentMethod, setPaymentMethod] = useState('zarinpal');
+  const [paymentMethod, setPaymentMethod] = useState('wallet');
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showInsufficientWalletModal, setShowInsufficientWalletModal] = useState(false);
+  const [showDiscardModal, setShowDiscardModal] = useState(false);
   const [processing, setProcessing] = useState(false);
 
-  const currentPlan = user?.subscription?.plan || 'free';
-  const daysRemaining = getDaysRemaining(user?.subscription?.endDate);
+  const paymentResult = searchParams.get('status');
+  const queryPlan = searchParams.get('plan');
+  const queryMethod = searchParams.get('method');
+  const queryModal = searchParams.get('modal');
+
+  const walletBalance = getWalletAvailableBalance(walletSummary, user);
+  const effectiveSubscription = currentSubscription || user?.subscription || null;
+  const currentPlan = effectiveSubscription?.plan || 'free';
+  const daysRemaining = getDaysRemaining(effectiveSubscription?.endDate);
+  const currentPlanLabel = plans.find((plan) => plan.id === currentPlan)?.name || PLAN_LABELS[currentPlan];
+  const selectedPlanLabel = selectedPlan?.name || (queryPlan ? PLAN_LABELS[queryPlan] : '');
+
+  const sortedPlans = useMemo(() => {
+    const order = { vip: 1, producer: 2 };
+    return [...plans].sort((a, b) => (order[a.id] || 99) - (order[b.id] || 99));
+  }, [plans]);
+
+  const loadSubscriptionOverview = useCallback(async () => {
+    setLoadingOverview(true);
+    try {
+      const [subscriptionResult, walletResult] = await Promise.allSettled([
+        subscriptionService.getMySubscription(),
+        userService.getWalletSummary(),
+      ]);
+
+      if (subscriptionResult.status === 'fulfilled') {
+        const payload = subscriptionResult.value?.data || subscriptionResult.value || {};
+        setCurrentSubscription(payload.subscription || null);
+        setSubscriptionLimits(payload.limits || null);
+      }
+
+      if (walletResult.status === 'fulfilled') {
+        setWalletSummary(walletResult.value?.data || walletResult.value || null);
+      }
+    } catch (error) {
+      toast.error('خطا در دریافت وضعیت اشتراک یا کیف پول');
+    } finally {
+      setLoadingOverview(false);
+    }
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -72,7 +103,7 @@ export default function Subscription() {
         const result = await subscriptionService.getPlans();
         const apiPlans = result?.data?.plans || result?.plans || [];
         const purchasablePlans = apiPlans
-          .filter((plan) => plan.isPurchasable && ['vip', 'producer'].includes(plan.name))
+          .filter((plan) => plan.isPurchasable && PURCHASABLE_PLAN_IDS.includes(plan.name))
           .map(normalizeBackendPlan);
 
         if (isMounted) {
@@ -89,20 +120,76 @@ export default function Subscription() {
     };
 
     loadPlans();
+    loadSubscriptionOverview();
 
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [loadSubscriptionOverview]);
+
+  useEffect(() => {
+    if (!plans.length || queryModal !== 'purchase' || !queryPlan) return;
+    const plan = plans.find((item) => item.id === queryPlan);
+    if (!plan) return;
+
+    setSelectedPlan(plan);
+    setPaymentMethod(['wallet', 'zarinpal'].includes(queryMethod) ? queryMethod : 'wallet');
+    setShowPaymentModal(true);
+  }, [plans, queryMethod, queryModal, queryPlan]);
+
+  const updatePurchaseParams = useCallback((plan, method = paymentMethod) => {
+    const next = new URLSearchParams(searchParams);
+    next.set('modal', 'purchase');
+    next.set('plan', plan.id);
+    next.set('method', method);
+    setSearchParams(next, { replace: false });
+  }, [paymentMethod, searchParams, setSearchParams]);
+
+  const clearPurchaseParams = useCallback((replace = true) => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('modal');
+    next.delete('plan');
+    next.delete('method');
+    setSearchParams(next, { replace });
+  }, [searchParams, setSearchParams]);
 
   const handleSelectPlan = (plan) => {
     if (plan.id === currentPlan) return;
     setSelectedPlan(plan);
+    setPaymentMethod('wallet');
     setShowPaymentModal(true);
+    updatePurchaseParams(plan, 'wallet');
+  };
+
+  const handlePaymentMethodChange = (method) => {
+    setPaymentMethod(method);
+    if (selectedPlan) updatePurchaseParams(selectedPlan, method);
+  };
+
+  const requestClosePurchaseModal = () => {
+    if (selectedPlan) {
+      setShowDiscardModal(true);
+      return;
+    }
+
+    setShowPaymentModal(false);
+    clearPurchaseParams();
+  };
+
+  const confirmClosePurchaseModal = () => {
+    setShowDiscardModal(false);
+    setShowPaymentModal(false);
+    setSelectedPlan(null);
+    clearPurchaseParams();
   };
 
   const handlePurchase = async () => {
     if (!selectedPlan) return;
+
+    if (paymentMethod === 'wallet' && walletBalance < selectedPlan.price) {
+      setShowInsufficientWalletModal(true);
+      return;
+    }
 
     setProcessing(true);
     try {
@@ -111,187 +198,102 @@ export default function Subscription() {
 
       if (paymentMethod === 'zarinpal' && payload?.paymentUrl) {
         window.location.href = payload.paymentUrl;
-      } else {
-        toast.success('اشتراک با موفقیت خریداری شد');
-        setShowPaymentModal(false);
+        return;
       }
+
+      toast.success(`اشتراک ${selectedPlan.name} با پرداخت از ${PAYMENT_METHOD_LABELS[paymentMethod]} فعال شد`);
+      setShowPaymentModal(false);
+      setSelectedPlan(null);
+      clearPurchaseParams();
+      await Promise.all([loadSubscriptionOverview(), fetchUser?.()]);
     } catch (error) {
-      toast.error(error.response?.data?.message || 'خطا در خرید اشتراک');
+      const message = error.response?.data?.message || error.message || 'خطا در خرید اشتراک';
+      if (paymentMethod === 'wallet' && message.includes('موجودی')) {
+        setShowInsufficientWalletModal(true);
+      } else {
+        toast.error(message);
+      }
     } finally {
       setProcessing(false);
     }
   };
 
+  const handleChargeWallet = () => {
+    const returnTo = `/dashboard/subscription?modal=purchase&plan=${selectedPlan?.id || queryPlan || 'vip'}&method=wallet`;
+    navigate(`/dashboard/wallet?returnTo=${encodeURIComponent(returnTo)}`);
+  };
+
+  const handleDismissPaymentResult = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('status');
+    setSearchParams(next, { replace: true });
+  };
+
+  const scrollToPlans = () => {
+    plansRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">اشتراک‌های فوبینو</h1>
-      </div>
+      <SubscriptionHero onScrollToPlans={scrollToPlans} onNavigate={navigate} />
 
-      {/* Current Plan */}
-      {currentPlan && (
-        <Card className="bg-gradient-to-l from-blue-900 to-blue-700 text-white">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-blue-100 text-sm">اشتراک فعلی شما</p>
-              <h2 className="text-xl font-bold">
-                {plans.find((plan) => plan.id === currentPlan)?.name || 'رایگان'}
-              </h2>
-              <p className="mt-2 text-sm text-blue-100">
-                VIP و تولیدکننده شامل ۸۵ دسترسی تماس و ۲۰ ساعت مشاوره آنلاین رایگان هستند.
-              </p>
-            </div>
-            <div className="text-left">
-              <p className="text-blue-100 text-sm">مدت باقیمانده</p>
-              <p className="text-2xl font-bold">{toPersianNumber(daysRemaining)} روز</p>
-            </div>
-          </div>
-        </Card>
-      )}
+      <PaymentResultBanner
+        result={paymentResult}
+        planLabel={selectedPlanLabel || currentPlanLabel}
+        onClose={handleDismissPaymentResult}
+      />
 
-      {/* Plans Grid */}
-      {loadingPlans ? (
-        <Card className="flex items-center justify-center gap-3 py-10 text-blue-800">
-          <Loader2 className="h-5 w-5 animate-spin" />
-          <span>در حال دریافت پلن‌ها...</span>
+      {loadingOverview ? (
+        <Card variant="wallet" className="animate-pulse rounded-3xl p-8">
+          <div className="h-6 w-52 rounded-full bg-blue-100" />
+          <div className="mt-5 h-4 w-3/4 rounded-full bg-slate-100" />
+          <div className="mt-3 h-4 w-1/2 rounded-full bg-slate-100" />
         </Card>
       ) : (
-        <div className="grid gap-6 md:grid-cols-2">
-          {plans.map((plan) => {
-            const Icon = planIcons[plan.id] || Crown;
-            const isCurrentPlan = plan.id === currentPlan;
-
-            return (
-              <Card
-                key={plan.id}
-                className={`relative overflow-hidden border-blue-100 ${
-                  plan.highlighted ? 'ring-2 ring-red-500' : ''
-                } ${isCurrentPlan ? 'opacity-70' : ''}`}
-              >
-                {plan.highlighted && (
-                  <div className="absolute left-0 right-0 top-0 bg-red-600 py-1 text-center text-sm text-white">
-                    ویژه تولیدکنندگان
-                  </div>
-                )}
-
-                {/* Plan Header */}
-                <div className={`p-6 text-center ${plan.highlighted ? 'pt-10' : ''}`}>
-                  <div className={`mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br ${planColors[plan.id]} shadow-lg`}>
-                    <Icon className="h-8 w-8 text-white" />
-                  </div>
-                  <h3 className="text-xl font-bold text-gray-900">{plan.name}</h3>
-                  <p className="text-gray-500 text-sm">{plan.duration}</p>
-                  <div className="mt-4">
-                    <span className="text-3xl font-bold text-blue-900">{plan.priceDisplay}</span>
-                  </div>
-                </div>
-
-                {/* Features */}
-                <div className="border-t border-blue-50 p-6">
-                  <ul className="space-y-3">
-                    {plan.features.map((feature, index) => (
-                      <li key={index} className="flex items-start gap-2 text-sm">
-                        <Check className="mt-0.5 h-5 w-5 flex-shrink-0 text-blue-700" />
-                        <span className="text-gray-600">{feature}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-
-                {/* CTA */}
-                <div className="p-6 pt-0">
-                  <Button
-                    className="w-full"
-                    variant={isCurrentPlan ? 'secondary' : 'primary'}
-                    disabled={isCurrentPlan}
-                    onClick={() => handleSelectPlan(plan)}
-                  >
-                    {isCurrentPlan ? 'اشتراک فعلی' : 'خرید اشتراک سالانه'}
-                  </Button>
-                </div>
-              </Card>
-            );
-          })}
-        </div>
+        <CurrentSubscriptionCard
+          subscription={effectiveSubscription}
+          limits={subscriptionLimits}
+          plans={sortedPlans}
+          daysRemaining={daysRemaining}
+          onBuyVip={() => handleSelectPlan(sortedPlans.find((plan) => plan.id === 'vip') || getFallbackPlans()[0])}
+          onBuyProducer={() => handleSelectPlan(sortedPlans.find((plan) => plan.id === 'producer') || getFallbackPlans()[1])}
+          onNavigate={navigate}
+        />
       )}
 
-      {/* Payment Modal */}
-      <Modal
+      <div ref={plansRef}>
+        <PlanComparisonGrid
+          plans={sortedPlans}
+          loading={loadingPlans}
+          currentPlan={currentPlan}
+          onSelect={handleSelectPlan}
+        />
+      </div>
+
+      <PurchaseSubscriptionModal
         isOpen={showPaymentModal}
-        onClose={() => setShowPaymentModal(false)}
-        title="خرید اشتراک"
-        size="md"
-      >
-        {selectedPlan && (
-          <div className="space-y-6">
-            <div className="rounded-lg bg-blue-50 p-4 text-center">
-              <h3 className="font-semibold text-lg">{selectedPlan.name}</h3>
-              <p className="text-gray-500">{selectedPlan.duration}</p>
-              <p className="mt-2 text-2xl font-bold text-blue-900">
-                {selectedPlan.priceDisplay}
-              </p>
-            </div>
+        onClose={requestClosePurchaseModal}
+        plan={selectedPlan}
+        paymentMethod={paymentMethod}
+        onPaymentMethodChange={handlePaymentMethodChange}
+        walletBalance={walletBalance}
+        processing={processing}
+        onSubmit={handlePurchase}
+      />
 
-            {selectedPlan.id === 'producer' && (
-              <div className="rounded-lg border border-red-100 bg-red-50 p-3 text-sm text-red-700">
-                خرید اشتراک تولیدکننده به معنی تأیید تولیدی نیست؛ ستاره‌های نشان تولیدکننده پس از احراز سطح‌ها نمایش داده می‌شود.
-              </div>
-            )}
+      <InsufficientWalletModal
+        isOpen={showInsufficientWalletModal}
+        onClose={() => setShowInsufficientWalletModal(false)}
+        plan={selectedPlan}
+        walletBalance={walletBalance}
+        onCharge={handleChargeWallet}
+      />
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-3">
-                روش پرداخت
-              </label>
-              <div className="space-y-2">
-                <label className="flex cursor-pointer items-center gap-3 rounded-lg border p-3 hover:bg-gray-50">
-                  <input
-                    type="radio"
-                    name="payment"
-                    value="zarinpal"
-                    checked={paymentMethod === 'zarinpal'}
-                    onChange={(e) => setPaymentMethod(e.target.value)}
-                    className="h-4 w-4 text-blue-700"
-                  />
-                  <span>درگاه پرداخت زرین‌پال</span>
-                </label>
-                <label className="flex cursor-pointer items-center gap-3 rounded-lg border p-3 hover:bg-gray-50">
-                  <input
-                    type="radio"
-                    name="payment"
-                    value="wallet"
-                    checked={paymentMethod === 'wallet'}
-                    onChange={(e) => setPaymentMethod(e.target.value)}
-                    className="h-4 w-4 text-blue-700"
-                  />
-                  <div className="flex flex-1 items-center justify-between">
-                    <span>کیف پول فوبینو</span>
-                    <span className="text-sm text-gray-500">
-                      موجودی: {toPersianNumber(user?.wallet?.balance || 0)} تومان
-                    </span>
-                  </div>
-                </label>
-              </div>
-            </div>
-
-            <div className="flex gap-3">
-              <Button
-                variant="secondary"
-                className="flex-1"
-                onClick={() => setShowPaymentModal(false)}
-              >
-                انصراف
-              </Button>
-              <Button
-                className="flex-1"
-                loading={processing}
-                onClick={handlePurchase}
-              >
-                پرداخت
-              </Button>
-            </div>
-          </div>
-        )}
-      </Modal>
+      <DiscardPurchaseModal
+        isOpen={showDiscardModal}
+        onCancel={() => setShowDiscardModal(false)}
+        onConfirm={confirmClosePurchaseModal}
+      />
     </div>
   );
 }
