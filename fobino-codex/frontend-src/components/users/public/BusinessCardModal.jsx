@@ -2,6 +2,7 @@ import { Printer, QrCode, Star, X } from 'lucide-react';
 import Modal from '../../ui/Modal';
 import Button from '../../ui/Button';
 import UserGradeBadge from '../analysis/UserGradeBadge';
+import UserTrustBadges from '../../common/UserTrustBadges';
 
 const avatarUrl = (avatar) => typeof avatar === 'string' ? avatar : avatar?.url || avatar?.secure_url || '';
 const subscriptionLabel = (subscription) => subscription?.planName || subscription?.planType || (subscription?.hasActiveSubscription ? 'اشتراک فعال' : 'بدون اشتراک فعال');
@@ -38,6 +39,7 @@ export default function BusinessCardModal({ isOpen, onClose, card }) {
                   <div>
                     <h3 className="text-3xl font-black leading-tight">{title}</h3>
                     {card?.fullName && card.fullName !== title && <p className="mt-1 text-sm font-bold text-emerald-100">{card.fullName}</p>}
+                    <UserTrustBadges badges={card?.badges} compact className="mt-2" />
                   </div>
                 </div>
                 <div className="mt-6 grid gap-3 sm:grid-cols-3">

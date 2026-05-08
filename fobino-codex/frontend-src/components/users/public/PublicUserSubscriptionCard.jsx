@@ -1,8 +1,9 @@
 import { BadgeCheck, CalendarClock, Crown, PackageCheck } from 'lucide-react';
+import UserTrustBadges from '../../common/UserTrustBadges';
 
 const formatDate = (value) => value ? new Date(value).toLocaleDateString('fa-IR', { year: 'numeric', month: 'long', day: 'numeric' }) : 'نامشخص';
 
-export default function PublicUserSubscriptionCard({ subscription }) {
+export default function PublicUserSubscriptionCard({ subscription, badges }) {
   const active = Boolean(subscription?.hasActiveSubscription || subscription?.status === 'active');
   const planName = subscription?.planName || subscription?.planType || 'اشتراک فعال';
 
@@ -23,6 +24,7 @@ export default function PublicUserSubscriptionCard({ subscription }) {
           <div className="rounded-3xl bg-gradient-to-br from-amber-50 to-white p-4 ring-1 ring-amber-100">
             <div className="flex items-center gap-2 text-amber-700"><BadgeCheck className="h-5 w-5" /><span className="text-sm font-black">اشتراک فعال</span></div>
             <p className="mt-3 text-lg font-black text-slate-900">{planName}</p>
+            <UserTrustBadges badges={badges} compact className="mt-3" />
           </div>
           <div className="rounded-3xl bg-slate-50 p-4 ring-1 ring-slate-100">
             <div className="flex items-center gap-2 text-slate-600"><PackageCheck className="h-5 w-5" /><span className="text-sm font-black">نوع پلن</span></div>
