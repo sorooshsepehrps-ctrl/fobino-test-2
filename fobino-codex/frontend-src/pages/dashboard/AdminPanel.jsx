@@ -44,6 +44,35 @@ const INSPECTION_STATUS_MAP = {
   factored: { label: 'فاکتور صادر شده', color: 'bg-gray-100 text-gray-800' },
 };
 
+
+const getPayload = (response) => response?.data ?? response ?? null;
+const getListPayload = (response, preferredKey) => {
+  const payload = getPayload(response);
+  if (Array.isArray(payload)) return payload;
+  if (preferredKey && Array.isArray(payload?.[preferredKey])) return payload[preferredKey];
+  if (Array.isArray(payload?.items)) return payload.items;
+  return [];
+};
+
+const PRODUCER_STATUS_LABELS = {
+  not_started: 'شروع نشده',
+  in_progress: 'در حال تکمیل',
+  pending_review: 'در انتظار بررسی',
+  verified_level_1: 'تایید سطح ۱',
+  verified_level_2: 'تایید سطح ۲',
+  verified_level_3: 'تایید سطح ۳',
+  rejected: 'رد شده',
+  suspended: 'تعلیق شده',
+  locked: 'قفل شده',
+  draft: 'پیش‌نویس',
+  pending: 'در انتظار بررسی',
+  approved: 'تایید شده',
+  requires_resubmit: 'نیازمند اصلاح',
+  revision_pending: 'اصلاحات در بررسی',
+  scheduled: 'زمان‌بندی شده',
+  visited: 'بازدید انجام شد',
+};
+
 export default function AdminPanel() {
   const { user } = useAuthStore();
   const [activeTab, setActiveTab] = useState('shipping');
@@ -90,7 +119,7 @@ export default function AdminPanel() {
   const fetchStats = async () => {
     try {
       const res = await adminService.getDashboardStats();
-      if (res.success) setStats(res.data);
+      if (res.success) setStats(getPayload(res));
     } catch (e) { console.error(e); }
   };
 
@@ -100,18 +129,18 @@ export default function AdminPanel() {
       if (activeTab === 'shipping') {
         const params = shippingFilter ? { status: shippingFilter } : {};
         const res = await adminService.getShippingRequests(params);
-        if (res.success) setShippingRequests(res.data || []);
+        if (res.success) setShippingRequests(getListPayload(res, 'requests'));
       } else if (activeTab === 'inspection') {
         const params = inspectionFilter ? { status: inspectionFilter } : {};
         const res = await adminService.getInspectionRequests(params);
-        if (res.success) setInspectionRequests(res.data || []);
+        if (res.success) setInspectionRequests(getListPayload(res, 'requests'));
       } else if (activeTab === 'deals') {
         const params = dealFilter ? { status: dealFilter } : {};
         const res = await adminService.getDeals(params);
-        if (res.success) setDeals(res.data || []);
+        if (res.success) setDeals(getListPayload(res, 'deals'));
       } else if (activeTab === 'producer-verifications') {
         const res = await producerVerificationService.adminList();
-        if (res.success) setProducerVerifications(res.data?.items || []);
+        if (res.success) setProducerVerifications(getListPayload(res, 'items'));
       }
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
@@ -166,19 +195,34 @@ export default function AdminPanel() {
   };
 
   const getProducerReviewLevel = (item) => {
-    if (item?.levels?.level3?.status === 'pending' || item?.levels?.level3?.status === 'visited') return 3;
-    if (item?.levels?.level2?.status === 'pending' || item?.levels?.level2?.status === 'revision_pending') return 2;
-    return 1;
+    if (item?.levels?.level3?.status === 'visited') return 3;
+    if (['pending', 'revision_pending'].includes(item?.levels?.level2?.status)) return 2;
+    if (['pending', 'revision_pending'].includes(item?.levels?.level1?.status)) return 1;
+    return null;
   };
 
   const handleProducerReview = async (item, action) => {
-    const level = getProducerReviewLevel(item);
+    const level = action === 'schedule' || action === 'visited' ? 3 : getProducerReviewLevel(item);
+    if (!level) {
+      alert('سطح قابل بررسی برای این درخواست وجود ندارد');
+      return;
+    }
     try {
       setActionLoading(true);
       if (action === 'approve') {
         await producerVerificationService.adminApprove(item._id, level);
+      } else if (action === 'reject') {
+        const reason = window.prompt('دلیل رد را وارد کنید') || 'رد شده توسط ادمین';
+        await producerVerificationService.adminReject(item._id, level, reason);
+      } else if (action === 'schedule') {
+        const scheduledAt = window.prompt('زمان بازدید را با فرمت ISO یا تاریخ قابل‌فهم وارد کنید');
+        if (!scheduledAt) return;
+        await producerVerificationService.adminScheduleVisit(item._id, scheduledAt);
+      } else if (action === 'visited') {
+        const notes = window.prompt('یادداشت بازدید را وارد کنید') || '';
+        await producerVerificationService.adminMarkVisited(item._id, notes);
       } else {
-        const reason = window.prompt('دلیل رد یا اصلاح را وارد کنید') || 'نیازمند اصلاح اطلاعات';
+        const reason = window.prompt('دلیل اصلاح را وارد کنید') || 'نیازمند اصلاح اطلاعات';
         await producerVerificationService.adminRequestResubmit(item._id, level, reason);
       }
       fetchData();
@@ -498,6 +542,7 @@ export default function AdminPanel() {
                 <div className="space-y-3">
                   {producerVerifications.map((item) => {
                     const reviewLevel = getProducerReviewLevel(item);
+                    const canApprove = Boolean(reviewLevel);
                     return (
                       <div key={item._id} className="rounded-xl border border-gray-200 bg-white p-4">
                         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -507,15 +552,28 @@ export default function AdminPanel() {
                               {item.user?.firstName} {item.user?.lastName} · {item.user?.phone || 'بدون شماره'} · سطح عمومی {toPersianNumber(item.publicLevel || 0)}
                             </p>
                             <p className="mt-2 text-xs text-gray-500">
-                              سطح ۱: {item.levels?.level1?.status} · سطح ۲: {item.levels?.level2?.status} · سطح ۳: {item.levels?.level3?.status}
+                              وضعیت کلی: {PRODUCER_STATUS_LABELS[item.overallStatus] || item.overallStatus || '—'} · سطح ۱: {PRODUCER_STATUS_LABELS[item.levels?.level1?.status] || item.levels?.level1?.status || '—'} · سطح ۲: {PRODUCER_STATUS_LABELS[item.levels?.level2?.status] || item.levels?.level2?.status || '—'} · سطح ۳: {PRODUCER_STATUS_LABELS[item.levels?.level3?.status] || item.levels?.level3?.status || '—'}
                             </p>
                           </div>
                           <div className="flex flex-wrap gap-2">
-                            <Button size="sm" disabled={actionLoading} onClick={() => handleProducerReview(item, 'approve')}>
-                              تایید سطح {toPersianNumber(reviewLevel)}
+                            <Button size="sm" disabled={actionLoading || !canApprove} onClick={() => handleProducerReview(item, 'approve')}>
+                              تایید سطح {reviewLevel ? toPersianNumber(reviewLevel) : '—'}
                             </Button>
-                            <Button size="sm" variant="danger" disabled={actionLoading} onClick={() => handleProducerReview(item, 'resubmit')}>
+                            {item.levels?.level3?.status === 'pending' && (
+                              <Button size="sm" variant="ghost" disabled={actionLoading} onClick={() => handleProducerReview(item, 'schedule')}>
+                                زمان‌بندی بازدید
+                              </Button>
+                            )}
+                            {item.levels?.level3?.status === 'scheduled' && (
+                              <Button size="sm" variant="ghost" disabled={actionLoading} onClick={() => handleProducerReview(item, 'visited')}>
+                                ثبت انجام بازدید
+                              </Button>
+                            )}
+                            <Button size="sm" variant="ghost" disabled={actionLoading} onClick={() => handleProducerReview(item, 'resubmit')}>
                               درخواست اصلاح
+                            </Button>
+                            <Button size="sm" variant="danger" disabled={actionLoading} onClick={() => handleProducerReview(item, 'reject')}>
+                              رد درخواست
                             </Button>
                           </div>
                         </div>
