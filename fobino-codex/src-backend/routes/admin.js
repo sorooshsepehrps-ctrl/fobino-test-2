@@ -3,6 +3,7 @@ const router = express.Router();
 const adminController = require('../controllers/adminController');
 const shippingController = require('../controllers/shippingController');
 const inspectionController = require('../controllers/inspectionController');
+const adminProducerVerificationController = require('../controllers/adminProducerVerificationController');
 const { protect } = require('../middleware/auth');
 const { isAdmin, isAdminOrSupport } = require('../middleware/roles');
 const { adminLimiter } = require('../middleware/rateLimit');
@@ -23,6 +24,17 @@ router.post('/users/:id/unban', adminController.unbanUser);
 router.get('/verifications', adminController.getVerificationRequests);
 router.post('/verifications/:id/approve', adminController.approveVerification);
 router.post('/verifications/:id/reject', adminController.rejectVerification);
+
+
+// Producer verification management
+router.get('/producer-verifications', adminProducerVerificationController.list);
+router.get('/producer-verifications/:id', adminProducerVerificationController.getOne);
+router.patch('/producer-verifications/:id/level/:level/approve', adminProducerVerificationController.approveLevel);
+router.patch('/producer-verifications/:id/level/:level/reject', adminProducerVerificationController.rejectLevel);
+router.patch('/producer-verifications/:id/level/:level/request-resubmit', adminProducerVerificationController.requestResubmit);
+router.patch('/producer-verifications/:id/level/3/schedule', adminProducerVerificationController.scheduleVisit);
+router.patch('/producer-verifications/:id/level/3/mark-visited', adminProducerVerificationController.markVisited);
+router.post('/producer-verifications/:id/notes', adminProducerVerificationController.addNote);
 
 // Posts
 router.get('/posts', adminController.getPosts);

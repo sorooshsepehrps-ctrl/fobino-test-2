@@ -8,13 +8,14 @@ const fileUploadService = require('../services/fileUploadService');
 const subscriptionService = require('../services/subscriptionService');
 const { paginate } = require('../utils/helpers');
 const logger = require('../utils/logger');
+const { buildBadgesForUser, buildBadgesForUsers } = require('../utils/presenters/userBadgePresenter');
 
 // Constants
 const NARDEBAN_PRICE = 100000; // 10,000 Toman = 100,000 Rials
 const SPECIAL_PRICE = 50000;   // 5,000 Toman = 50,000 Rials
 
 const postBasePopulate = [
-  { path: 'user', select: 'firstName lastName profileImage scores verifications level phone email' },
+  { path: 'user', select: 'firstName lastName profileImage scores verifications level producerVerificationStatus phone email' },
   { path: 'categoryLevel1', select: 'name slug' },
   { path: 'categoryLevel2', select: 'name slug' },
   { path: 'categoryLevel3', select: 'name slug' }
@@ -43,6 +44,10 @@ const buildPostResponseObject = async (postDoc, req) => {
     post.isSpecial &&
     (!post.specialExpiresAt || new Date(post.specialExpiresAt) > new Date())
   );
+
+  if (post.user) {
+    post.user.badges = await buildBadgesForUser(post.user);
+  }
 
   if (post.type === 'buy') {
     if (req.user && post.user?._id?.toString() !== req.user._id.toString()) {
@@ -422,11 +427,23 @@ exports.getPosts = asyncHandler(async (req, res) => {
     .sort(sortOption)
     .skip(skip)
     .limit(limitNum)
-    .populate('user', 'firstName lastName profileImage scores verifications level phone')
+    .populate('user', 'firstName lastName profileImage scores verifications level producerVerificationStatus phone')
     .populate('categoryLevel1', 'name slug')
     .populate('categoryLevel2', 'name slug')
     .populate('categoryLevel3', 'name slug')
     .lean();
+
+  const badgesByUser = await buildBadgesForUsers(posts.map((post) => post.user).filter(Boolean));
+  posts = posts.map((post) => {
+    if (!post.user) return post;
+    return {
+      ...post,
+      user: {
+        ...post.user,
+        badges: badgesByUser[String(post.user._id)] || post.user.badges,
+      },
+    };
+  });
 
   // For priority sort, we need to manually sort
   if (sort === 'priority') {
@@ -540,7 +557,7 @@ exports.getPostBySlug = asyncHandler(async (req, res) => {
 // @access  Public/Private
 exports.getPost = asyncHandler(async (req, res) => {
   const post = await Post.findById(req.params.id)
-    .populate('user', 'firstName lastName profileImage scores verifications level phone email')
+    .populate('user', 'firstName lastName profileImage scores verifications level producerVerificationStatus phone email')
     .populate('categoryLevel1', 'name slug')
     .populate('categoryLevel2', 'name slug')
     .populate('categoryLevel3', 'name slug');
@@ -563,6 +580,9 @@ exports.getPost = asyncHandler(async (req, res) => {
 
   // Prepare response
   const postObj = post.toObject();
+  if (postObj.user) {
+    postObj.user.badges = await buildBadgesForUser(postObj.user);
+  }
   
   // Add display price
   postObj.displayPrice = post.type === 'sell' 

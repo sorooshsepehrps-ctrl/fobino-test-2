@@ -248,6 +248,7 @@ const transactionSchema = new mongoose.Schema(
       userAgent: String,
       notes: String,
       source: String,
+      returnTo: String,
       actorId: String,
       actorType: String,
       tags: [String],

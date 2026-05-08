@@ -17,9 +17,11 @@ import {
   Upload,
   Hash,
   AlertTriangle,
+  Factory,
 } from 'lucide-react';
 import { Button, Modal, Card } from '../../components/ui';
 import adminService from '../../services/adminService';
+import producerVerificationService from '../../services/producerVerificationService';
 import useAuthStore from '../../store/authStore';
 import { formatPrice, toPersianNumber } from '../../utils/helpers';
 
@@ -61,6 +63,9 @@ export default function AdminPanel() {
   // Deals state
   const [deals, setDeals] = useState([]);
   const [dealFilter, setDealFilter] = useState('');
+
+  // Producer verification state
+  const [producerVerifications, setProducerVerifications] = useState([]);
 
   // Action modals
   const [actionLoading, setActionLoading] = useState(false);
@@ -104,6 +109,9 @@ export default function AdminPanel() {
         const params = dealFilter ? { status: dealFilter } : {};
         const res = await adminService.getDeals(params);
         if (res.success) setDeals(res.data || []);
+      } else if (activeTab === 'producer-verifications') {
+        const res = await producerVerificationService.adminList();
+        if (res.success) setProducerVerifications(res.data?.items || []);
       }
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
@@ -151,6 +159,28 @@ export default function AdminPanel() {
       await adminService.provideInspectionResult(resultModal.id, inspectionResult);
       setResultModal({ open: false, id: null });
       setInspectionResult('');
+      fetchData();
+    } catch (e) {
+      alert(e.response?.data?.message || 'خطا');
+    } finally { setActionLoading(false); }
+  };
+
+  const getProducerReviewLevel = (item) => {
+    if (item?.levels?.level3?.status === 'pending' || item?.levels?.level3?.status === 'visited') return 3;
+    if (item?.levels?.level2?.status === 'pending' || item?.levels?.level2?.status === 'revision_pending') return 2;
+    return 1;
+  };
+
+  const handleProducerReview = async (item, action) => {
+    const level = getProducerReviewLevel(item);
+    try {
+      setActionLoading(true);
+      if (action === 'approve') {
+        await producerVerificationService.adminApprove(item._id, level);
+      } else {
+        const reason = window.prompt('دلیل رد یا اصلاح را وارد کنید') || 'نیازمند اصلاح اطلاعات';
+        await producerVerificationService.adminRequestResubmit(item._id, level, reason);
+      }
       fetchData();
     } catch (e) {
       alert(e.response?.data?.message || 'خطا');
@@ -258,6 +288,7 @@ export default function AdminPanel() {
           { key: 'shipping', label: 'ارسال فوبینو', icon: Truck },
           { key: 'inspection', label: 'بازرسی فوبینو', icon: SearchIcon },
           { key: 'deals', label: 'قراردادها', icon: FileText },
+          { key: 'producer-verifications', label: 'احراز تولیدکننده', icon: Factory },
         ].map(tab => (
           <button
             key={tab.key}
@@ -445,6 +476,49 @@ export default function AdminPanel() {
                             </div>
                           </div>
                         )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+
+
+          {/* ===== PRODUCER VERIFICATIONS TAB ===== */}
+          {activeTab === 'producer-verifications' && (
+            <div className="space-y-4">
+              {producerVerifications.length === 0 ? (
+                <div className="text-center py-12 text-gray-400">
+                  <Factory className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                  <p>درخواست احراز تولیدکننده‌ای یافت نشد</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {producerVerifications.map((item) => {
+                    const reviewLevel = getProducerReviewLevel(item);
+                    return (
+                      <div key={item._id} className="rounded-xl border border-gray-200 bg-white p-4">
+                        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                          <div>
+                            <p className="font-bold text-gray-900">{item.production?.name || 'تولیدی بدون نام'}</p>
+                            <p className="mt-1 text-xs text-gray-500">
+                              {item.user?.firstName} {item.user?.lastName} · {item.user?.phone || 'بدون شماره'} · سطح عمومی {toPersianNumber(item.publicLevel || 0)}
+                            </p>
+                            <p className="mt-2 text-xs text-gray-500">
+                              سطح ۱: {item.levels?.level1?.status} · سطح ۲: {item.levels?.level2?.status} · سطح ۳: {item.levels?.level3?.status}
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Button size="sm" disabled={actionLoading} onClick={() => handleProducerReview(item, 'approve')}>
+                              تایید سطح {toPersianNumber(reviewLevel)}
+                            </Button>
+                            <Button size="sm" variant="danger" disabled={actionLoading} onClick={() => handleProducerReview(item, 'resubmit')}>
+                              درخواست اصلاح
+                            </Button>
+                          </div>
+                        </div>
                       </div>
                     );
                   })}

@@ -1,220 +1,299 @@
-import { useState } from 'react';
-import { Check, Crown, Star, Sparkles, Building, Zap } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { Button, Card, Modal } from '../../components/ui';
+import { Card } from '../../components/ui';
 import useAuthStore from '../../store/authStore';
-import { SUBSCRIPTION_PLANS } from '../../config/constants';
-import { toPersianNumber, getDaysRemaining } from '../../utils/helpers';
-import { subscriptionService } from '../../services';
+import { SUBSCRIPTION_PLANS as FALLBACK_SUBSCRIPTION_PLANS } from '../../config/constants';
+import { getDaysRemaining } from '../../utils/helpers';
+import { subscriptionService, userService } from '../../services';
+import SubscriptionHero from '../../components/subscription/SubscriptionHero';
+import CurrentSubscriptionCard from '../../components/subscription/CurrentSubscriptionCard';
+import PlanComparisonGrid from '../../components/subscription/PlanComparisonGrid';
+import PurchaseSubscriptionModal from '../../components/subscription/PurchaseSubscriptionModal';
+import InsufficientWalletModal from '../../components/subscription/InsufficientWalletModal';
+import PaymentResultBanner from '../../components/subscription/PaymentResultBanner';
+import DiscardPurchaseModal from '../../components/subscription/DiscardPurchaseModal';
+import {
+  normalizeBackendPlan,
+  normalizeFallbackPlan,
+  PAYMENT_METHOD_LABELS,
+  PLAN_LABELS,
+} from '../../components/subscription/subscriptionUtils';
 
-const planIcons = {
-  free: Zap,
-  silver: Star,
-  gold: Crown,
-  vip: Sparkles,
-  producer: Building,
-};
+const PURCHASABLE_PLAN_IDS = ['vip', 'producer'];
 
-const planColors = {
-  free: 'from-gray-400 to-gray-500',
-  silver: 'from-gray-300 to-gray-400',
-  gold: 'from-yellow-400 to-amber-500',
-  vip: 'from-purple-500 to-indigo-600',
-  producer: 'from-emerald-500 to-teal-600',
+const getFallbackPlans = () => FALLBACK_SUBSCRIPTION_PLANS
+  .filter((plan) => PURCHASABLE_PLAN_IDS.includes(plan.id))
+  .map(normalizeFallbackPlan);
+
+const getWalletAvailableBalance = (walletSummary, user) => {
+  if (typeof walletSummary?.available === 'number') return walletSummary.available;
+  if (typeof walletSummary?.balance?.available === 'number') return walletSummary.balance.available;
+  if (typeof user?.wallet?.balance === 'number') return user.wallet.balance;
+  if (typeof user?.wallet?.available === 'number') return user.wallet.available;
+  return 0;
 };
 
 export default function Subscription() {
-  const { user } = useAuthStore();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const plansRef = useRef(null);
+  const { user, fetchUser } = useAuthStore();
+
+  const [plans, setPlans] = useState([]);
+  const [loadingPlans, setLoadingPlans] = useState(true);
+  const [loadingOverview, setLoadingOverview] = useState(true);
+  const [currentSubscription, setCurrentSubscription] = useState(null);
+  const [subscriptionLimits, setSubscriptionLimits] = useState(null);
+  const [walletSummary, setWalletSummary] = useState(null);
   const [selectedPlan, setSelectedPlan] = useState(null);
-  const [paymentMethod, setPaymentMethod] = useState('zarinpal');
+  const [paymentMethod, setPaymentMethod] = useState('wallet');
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showInsufficientWalletModal, setShowInsufficientWalletModal] = useState(false);
+  const [showDiscardModal, setShowDiscardModal] = useState(false);
   const [processing, setProcessing] = useState(false);
 
-  const currentPlan = user?.subscription?.plan?.name || 'free';
-  const daysRemaining = getDaysRemaining(user?.subscription?.endDate);
+  const paymentResult = searchParams.get('status');
+  const queryPlan = searchParams.get('plan');
+  const queryMethod = searchParams.get('method');
+  const queryModal = searchParams.get('modal');
+
+  const walletBalance = getWalletAvailableBalance(walletSummary, user);
+  const effectiveSubscription = currentSubscription || user?.subscription || null;
+  const currentPlan = effectiveSubscription?.plan || 'free';
+  const daysRemaining = getDaysRemaining(effectiveSubscription?.endDate);
+  const currentPlanLabel = plans.find((plan) => plan.id === currentPlan)?.name || PLAN_LABELS[currentPlan];
+  const selectedPlanLabel = selectedPlan?.name || (queryPlan ? PLAN_LABELS[queryPlan] : '');
+
+  const sortedPlans = useMemo(() => {
+    const order = { vip: 1, producer: 2 };
+    return [...plans].sort((a, b) => (order[a.id] || 99) - (order[b.id] || 99));
+  }, [plans]);
+
+  const loadSubscriptionOverview = useCallback(async () => {
+    setLoadingOverview(true);
+    try {
+      const [subscriptionResult, walletResult] = await Promise.allSettled([
+        subscriptionService.getMySubscription(),
+        userService.getWalletSummary(),
+      ]);
+
+      if (subscriptionResult.status === 'fulfilled') {
+        const payload = subscriptionResult.value?.data || subscriptionResult.value || {};
+        setCurrentSubscription(payload.subscription || null);
+        setSubscriptionLimits(payload.limits || null);
+      }
+
+      if (walletResult.status === 'fulfilled') {
+        setWalletSummary(walletResult.value?.data || walletResult.value || null);
+      }
+    } catch (error) {
+      toast.error('خطا در دریافت وضعیت اشتراک یا کیف پول');
+    } finally {
+      setLoadingOverview(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadPlans = async () => {
+      setLoadingPlans(true);
+      try {
+        const result = await subscriptionService.getPlans();
+        const apiPlans = result?.data?.plans || result?.plans || [];
+        const purchasablePlans = apiPlans
+          .filter((plan) => plan.isPurchasable && PURCHASABLE_PLAN_IDS.includes(plan.name))
+          .map(normalizeBackendPlan);
+
+        if (isMounted) {
+          setPlans(purchasablePlans.length ? purchasablePlans : getFallbackPlans());
+        }
+      } catch (error) {
+        if (isMounted) {
+          setPlans(getFallbackPlans());
+          toast.error('دریافت پلن‌ها از سرور ناموفق بود؛ پلن‌های پیش‌فرض نمایش داده شد');
+        }
+      } finally {
+        if (isMounted) setLoadingPlans(false);
+      }
+    };
+
+    loadPlans();
+    loadSubscriptionOverview();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [loadSubscriptionOverview]);
+
+  useEffect(() => {
+    if (!plans.length || queryModal !== 'purchase' || !queryPlan) return;
+    const plan = plans.find((item) => item.id === queryPlan);
+    if (!plan) return;
+
+    setSelectedPlan(plan);
+    setPaymentMethod(['wallet', 'zarinpal'].includes(queryMethod) ? queryMethod : 'wallet');
+    setShowPaymentModal(true);
+  }, [plans, queryMethod, queryModal, queryPlan]);
+
+  const updatePurchaseParams = useCallback((plan, method = paymentMethod) => {
+    const next = new URLSearchParams(searchParams);
+    next.set('modal', 'purchase');
+    next.set('plan', plan.id);
+    next.set('method', method);
+    setSearchParams(next, { replace: false });
+  }, [paymentMethod, searchParams, setSearchParams]);
+
+  const clearPurchaseParams = useCallback((replace = true) => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('modal');
+    next.delete('plan');
+    next.delete('method');
+    setSearchParams(next, { replace });
+  }, [searchParams, setSearchParams]);
 
   const handleSelectPlan = (plan) => {
     if (plan.id === currentPlan) return;
     setSelectedPlan(plan);
+    setPaymentMethod('wallet');
     setShowPaymentModal(true);
+    updatePurchaseParams(plan, 'wallet');
+  };
+
+  const handlePaymentMethodChange = (method) => {
+    setPaymentMethod(method);
+    if (selectedPlan) updatePurchaseParams(selectedPlan, method);
+  };
+
+  const requestClosePurchaseModal = () => {
+    if (selectedPlan) {
+      setShowDiscardModal(true);
+      return;
+    }
+
+    setShowPaymentModal(false);
+    clearPurchaseParams();
+  };
+
+  const confirmClosePurchaseModal = () => {
+    setShowDiscardModal(false);
+    setShowPaymentModal(false);
+    setSelectedPlan(null);
+    clearPurchaseParams();
   };
 
   const handlePurchase = async () => {
     if (!selectedPlan) return;
-    
+
+    if (paymentMethod === 'wallet' && walletBalance < selectedPlan.price) {
+      setShowInsufficientWalletModal(true);
+      return;
+    }
+
     setProcessing(true);
     try {
       const response = await subscriptionService.purchase(selectedPlan.id, paymentMethod);
-      
-      if (paymentMethod === 'zarinpal' && response.data?.paymentUrl) {
-        window.location.href = response.data.paymentUrl;
-      } else {
-        toast.success('اشتراک با موفقیت خریداری شد');
-        setShowPaymentModal(false);
+      const payload = response?.data || response;
+
+      if (paymentMethod === 'zarinpal' && payload?.paymentUrl) {
+        window.location.href = payload.paymentUrl;
+        return;
       }
+
+      toast.success(`اشتراک ${selectedPlan.name} با پرداخت از ${PAYMENT_METHOD_LABELS[paymentMethod]} فعال شد`);
+      setShowPaymentModal(false);
+      setSelectedPlan(null);
+      clearPurchaseParams();
+      await Promise.all([loadSubscriptionOverview(), fetchUser?.()]);
     } catch (error) {
-      toast.error(error.response?.data?.message || 'خطا در خرید اشتراک');
+      const message = error.response?.data?.message || error.message || 'خطا در خرید اشتراک';
+      if (paymentMethod === 'wallet' && message.includes('موجودی')) {
+        setShowInsufficientWalletModal(true);
+      } else {
+        toast.error(message);
+      }
     } finally {
       setProcessing(false);
     }
   };
 
+  const handleChargeWallet = () => {
+    const returnTo = `/dashboard/subscription?modal=purchase&plan=${selectedPlan?.id || queryPlan || 'vip'}&method=wallet`;
+    navigate(`/dashboard/wallet?returnTo=${encodeURIComponent(returnTo)}`);
+  };
+
+  const handleDismissPaymentResult = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('status');
+    setSearchParams(next, { replace: true });
+  };
+
+  const scrollToPlans = () => {
+    plansRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">ارتقاء عضویت</h1>
-      </div>
+      <SubscriptionHero onScrollToPlans={scrollToPlans} onNavigate={navigate} />
 
-      {/* Current Plan */}
-      {currentPlan && (
-        <Card className="bg-gradient-to-l from-emerald-500 to-teal-600 text-white">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-emerald-100 text-sm">اشتراک فعلی شما</p>
-              <h2 className="text-xl font-bold">
-                {SUBSCRIPTION_PLANS.find(p => p.id === currentPlan)?.name || 'رایگان'}
-              </h2>
-            </div>
-            <div className="text-left">
-              <p className="text-emerald-100 text-sm">مدت باقیمانده</p>
-              <p className="text-2xl font-bold">{toPersianNumber(daysRemaining)} روز</p>
-            </div>
-          </div>
+      <PaymentResultBanner
+        result={paymentResult}
+        planLabel={selectedPlanLabel || currentPlanLabel}
+        onClose={handleDismissPaymentResult}
+      />
+
+      {loadingOverview ? (
+        <Card variant="wallet" className="animate-pulse rounded-3xl p-8">
+          <div className="h-6 w-52 rounded-full bg-blue-100" />
+          <div className="mt-5 h-4 w-3/4 rounded-full bg-slate-100" />
+          <div className="mt-3 h-4 w-1/2 rounded-full bg-slate-100" />
         </Card>
+      ) : (
+        <CurrentSubscriptionCard
+          subscription={effectiveSubscription}
+          limits={subscriptionLimits}
+          plans={sortedPlans}
+          daysRemaining={daysRemaining}
+          onBuyVip={() => handleSelectPlan(sortedPlans.find((plan) => plan.id === 'vip') || getFallbackPlans()[0])}
+          onBuyProducer={() => handleSelectPlan(sortedPlans.find((plan) => plan.id === 'producer') || getFallbackPlans()[1])}
+          onNavigate={navigate}
+        />
       )}
 
-      {/* Plans Grid */}
-      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {SUBSCRIPTION_PLANS.slice().reverse().map((plan) => {
-          const Icon = planIcons[plan.id];
-          const isCurrentPlan = plan.id === currentPlan;
-          
-          return (
-            <Card
-              key={plan.id}
-              className={`relative overflow-hidden ${
-                plan.highlighted ? 'ring-2 ring-emerald-500' : ''
-              } ${isCurrentPlan ? 'opacity-60' : ''}`}
-            >
-              {plan.highlighted && (
-                <div className="absolute top-0 left-0 right-0 bg-emerald-500 text-white text-center text-sm py-1">
-                  پیشنهاد ویژه
-                </div>
-              )}
-              
-              {/* Plan Header */}
-              <div className={`p-6 text-center ${plan.highlighted ? 'pt-10' : ''}`}>
-                <div className={`w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br ${planColors[plan.id]} flex items-center justify-center`}>
-                  <Icon className="w-8 h-8 text-white" />
-                </div>
-                <h3 className="text-xl font-bold text-gray-900">{plan.name}</h3>
-                <p className="text-gray-500 text-sm">{plan.duration}</p>
-                <div className="mt-4">
-                  <span className="text-3xl font-bold text-gray-900">{plan.priceDisplay}</span>
-                </div>
-              </div>
-
-              {/* Features */}
-              <div className="border-t p-6">
-                <ul className="space-y-3">
-                  {plan.features.map((feature, index) => (
-                    <li key={index} className="flex items-start gap-2 text-sm">
-                      <Check className="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" />
-                      <span className="text-gray-600">{feature}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              {/* CTA */}
-              <div className="p-6 pt-0">
-                <Button
-                  className="w-full"
-                  variant={isCurrentPlan ? 'secondary' : 'primary'}
-                  disabled={isCurrentPlan}
-                  onClick={() => handleSelectPlan(plan)}
-                >
-                  {isCurrentPlan ? 'اشتراک فعلی' : 'ارتقا عضویت'}
-                </Button>
-              </div>
-            </Card>
-          );
-        })}
+      <div ref={plansRef}>
+        <PlanComparisonGrid
+          plans={sortedPlans}
+          loading={loadingPlans}
+          currentPlan={currentPlan}
+          onSelect={handleSelectPlan}
+        />
       </div>
 
-      {/* Payment Modal */}
-      <Modal
+      <PurchaseSubscriptionModal
         isOpen={showPaymentModal}
-        onClose={() => setShowPaymentModal(false)}
-        title="خرید اشتراک"
-        size="md"
-      >
-        {selectedPlan && (
-          <div className="space-y-6">
-            <div className="text-center p-4 bg-gray-50 rounded-lg">
-              <h3 className="font-semibold text-lg">{selectedPlan.name}</h3>
-              <p className="text-gray-500">{selectedPlan.duration}</p>
-              <p className="text-2xl font-bold text-emerald-600 mt-2">
-                {selectedPlan.priceDisplay}
-              </p>
-            </div>
+        onClose={requestClosePurchaseModal}
+        plan={selectedPlan}
+        paymentMethod={paymentMethod}
+        onPaymentMethodChange={handlePaymentMethodChange}
+        walletBalance={walletBalance}
+        processing={processing}
+        onSubmit={handlePurchase}
+      />
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-3">
-                روش پرداخت
-              </label>
-              <div className="space-y-2">
-                <label className="flex items-center gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
-                  <input
-                    type="radio"
-                    name="payment"
-                    value="zarinpal"
-                    checked={paymentMethod === 'zarinpal'}
-                    onChange={(e) => setPaymentMethod(e.target.value)}
-                    className="w-4 h-4 text-emerald-600"
-                  />
-                  <span>درگاه پرداخت زرین‌پال</span>
-                </label>
-                {user?.level >= 2 && (
-                  <label className="flex items-center gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
-                    <input
-                      type="radio"
-                      name="payment"
-                      value="wallet"
-                      checked={paymentMethod === 'wallet'}
-                      onChange={(e) => setPaymentMethod(e.target.value)}
-                      className="w-4 h-4 text-emerald-600"
-                    />
-                    <div className="flex-1 flex items-center justify-between">
-                      <span>کیف پول فوبینو</span>
-                      <span className="text-sm text-gray-500">
-                        موجودی: {toPersianNumber(user?.wallet?.balance || 0)} تومان
-                      </span>
-                    </div>
-                  </label>
-                )}
-              </div>
-            </div>
+      <InsufficientWalletModal
+        isOpen={showInsufficientWalletModal}
+        onClose={() => setShowInsufficientWalletModal(false)}
+        plan={selectedPlan}
+        walletBalance={walletBalance}
+        onCharge={handleChargeWallet}
+      />
 
-            <div className="flex gap-3">
-              <Button
-                variant="secondary"
-                className="flex-1"
-                onClick={() => setShowPaymentModal(false)}
-              >
-                انصراف
-              </Button>
-              <Button
-                className="flex-1"
-                loading={processing}
-                onClick={handlePurchase}
-              >
-                پرداخت
-              </Button>
-            </div>
-          </div>
-        )}
-      </Modal>
+      <DiscardPurchaseModal
+        isOpen={showDiscardModal}
+        onCancel={() => setShowDiscardModal(false)}
+        onConfirm={confirmClosePurchaseModal}
+      />
     </div>
   );
 }

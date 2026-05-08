@@ -1,9 +1,11 @@
 import { MessageCircle, PhoneCall, ShieldCheck, Store } from 'lucide-react';
 import PosterInfo from '../posts/PosterInfo';
+import UserTrustBadges from '../../common/UserTrustBadges';
 import { buildPosterMeta } from '../../../utils/marketplace';
 
 export default function PostSellerCard({ post, onContactClick }) {
   const user = post?.user;
+  const hasTrustBadges = Boolean(user?.badges?.vip?.active || user?.badges?.producer?.active);
 
   return (
     <aside className="rounded-[30px] border border-slate-200 bg-white p-5 shadow-[0_25px_80px_-45px_rgba(15,23,42,0.28)] md:p-6">
@@ -35,6 +37,13 @@ export default function PostSellerCard({ post, onContactClick }) {
               {user?.verifications?.identity || user?.isVerified ? 'تأیید شده' : 'عادی'}
             </span>
           </div>
+
+          {hasTrustBadges ? (
+            <div className="rounded-2xl bg-white px-4 py-3">
+              <span className="text-xs font-bold text-slate-400">نشان‌های عمومی</span>
+              <UserTrustBadges badges={user?.badges} className="mt-2" />
+            </div>
+          ) : null}
         </div>
       </div>
 

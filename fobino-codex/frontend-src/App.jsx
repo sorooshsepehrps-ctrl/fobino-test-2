@@ -14,6 +14,7 @@ import {
   MyFobino,
   Profile,
   Subscription,
+  ProducerVerification,
   Verification,
   Tickets,
   NewTicket,
@@ -111,6 +112,7 @@ function App() {
           <Route index element={<MyFobino />} />
           <Route path="profile" element={<Profile />} />
           <Route path="subscription" element={<Subscription />} />
+          <Route path="producer-verification" element={<ProducerVerification />} />
           <Route path="verification" element={<Verification />} />
           <Route path="wallet" element={<Wallet />} />
           <Route path="messages" element={<Messages />} />

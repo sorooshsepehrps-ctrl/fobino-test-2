@@ -50,6 +50,7 @@ function presentPublicUser(user) {
     socialLinks: safeSocialLinks(user.publicProfile?.socialLinks),
     isIdentityVerified: user.identityVerificationStatus === 'verified' || Number(user.level || 0) >= 2,
     isProducerVerified: user.producerVerificationStatus === 'verified',
+    badges: user.badges || null,
     profileCompletionPercent: Math.max(0, Math.min(100, Number(user.profileCompletionPercent || 0))),
     reviewStats: {
       averageRating: Number(reviewStats.averageRating || 0),
