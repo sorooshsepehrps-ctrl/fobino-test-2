@@ -96,10 +96,10 @@
 //     if (paymentMethod === 'zarinpal') {
 //       const callbackUrl = `${process.env.BASE_URL}/api/subscriptions/verify`;
 //       const description = `خرید اشتراک ${plan.nameFa}`;
-      
+
 //       try {
 //         const result = await zarinpal.request(plan.price, description, callbackUrl);
-        
+
 //         if (result.success) {
 //           // Create pending subscription
 //           const subscription = new Subscription({
@@ -203,7 +203,7 @@
 
 //     try {
 //       const result = await zarinpal.verify(authority, subscription.payment.amount);
-      
+
 //       if (result.success) {
 //         subscription.status = 'active';
 //         subscription.startDate = new Date();
@@ -255,7 +255,7 @@
 //     }
 
 //     const currentPlan = this.getPlan(currentSub.plan);
-    
+
 //     // Calculate prorated amount
 //     const remainingDays = currentSub.remainingDays;
 //     const dailyRateCurrent = currentPlan.price / currentPlan.duration;
@@ -323,7 +323,7 @@
 //   // Cancel subscription
 //   async cancel(userId) {
 //     const subscription = await this.getUserSubscription(userId);
-    
+
 //     if (!subscription || subscription.status !== 'active') {
 //       throw new Error('اشتراک فعالی یافت نشد');
 //     }
@@ -338,7 +338,7 @@
 //   // Check limits
 //   async checkLimits(userId) {
 //     const subscription = await this.getUserSubscription(userId);
-    
+
 //     if (!subscription || subscription.status !== 'active') {
 //       return {
 //         hasActiveSubscription: false,
@@ -371,7 +371,7 @@
 //   // Use sell post quota
 //   async useSellPostQuota(userId) {
 //     const subscription = await this.getUserSubscription(userId);
-    
+
 //     if (!subscription || subscription.status !== 'active') {
 //       throw new Error('اشتراک فعالی یافت نشد');
 //     }
@@ -383,7 +383,7 @@
 //   // Use access to buy posts quota
 //   async useAccessQuota(userId) {
 //     const subscription = await this.getUserSubscription(userId);
-    
+
 //     if (!subscription || subscription.status !== 'active') {
 //       throw new Error('اشتراک فعالی یافت نشد');
 //     }
@@ -395,7 +395,7 @@
 //   // Purchase extra quota
 //   async purchaseExtraQuota(userId, type, amount) {
 //     const subscription = await this.getUserSubscription(userId);
-    
+
 //     if (!subscription || subscription.status !== 'active') {
 //       throw new Error('اشتراک فعالی یافت نشد');
 //     }
@@ -406,7 +406,7 @@
 //     };
 
 //     const price = prices[type] * amount;
-    
+
 //     const wallet = await Wallet.getOrCreateWallet(userId);
 //     if (!wallet.hasSufficientBalance(price, 'IRR')) {
 //       throw new Error('موجودی کیف پول کافی نیست');
@@ -493,7 +493,7 @@
 //       sub.status = 'expired';
 //       sub.notificationsSent.expired = true;
 //       await sub.save();
-      
+
 //       // Create free subscription
 //       await Subscription.createFreeSubscription(sub.user);
 //     }
@@ -506,7 +506,6 @@
 const Subscription = require('../models/Subscription');
 const Transaction = require('../models/Transaction');
 const Wallet = require('../models/Wallet');
-const User = require('../models/User');
 const { SUBSCRIPTION_PLANS, QUOTA_PRICES } = require('../config/constants');
 const { zarinpal } = require('../config/payment');
 const notificationService = require('./notificationService');
@@ -559,6 +558,31 @@ async function markSubscriptionGatewayTransactionFailed(transaction, reason) {
 
 
 class SubscriptionService {
+  buildPlanDetails(plan) {
+    return {
+      duration: plan.duration,
+      sellPosts: plan.sellPosts,
+      buyPosts: plan.buyPosts,
+      accessToBuyPosts: plan.accessToBuyPosts,
+      maxOffersVisible: plan.maxOffersVisible,
+      maxChatsPerPost: plan.maxChatsPerPost,
+      consultationOnlineIncludedMinutes: plan.consultationOnlineIncludedMinutes || 0,
+      consultationInPersonEligible: Boolean(plan.consultationInPersonEligible),
+      badge: plan.badge,
+      features: plan.features
+    };
+  }
+
+  buildConsultationQuota(plan) {
+    return {
+      onlineIncludedMinutes: plan.consultationOnlineIncludedMinutes || 0,
+      onlineReservedMinutes: 0,
+      onlineConsumedMinutes: 0,
+      onlineReleasedMinutes: 0,
+      inPersonEligible: Boolean(plan.consultationInPersonEligible)
+    };
+  }
+
   // Get all plans
   getPlans() {
     return Object.values(SUBSCRIPTION_PLANS).map(plan => ({
@@ -566,9 +590,13 @@ class SubscriptionService {
       nameFa: plan.nameFa,
       duration: plan.duration,
       price: plan.price,
+      isPurchasable: Boolean(plan.isPurchasable),
       sellPosts: plan.sellPosts,
       buyPosts: plan.buyPosts,
       accessToBuyPosts: plan.accessToBuyPosts,
+      consultationOnlineIncludedMinutes: plan.consultationOnlineIncludedMinutes || 0,
+      consultationInPersonEligible: Boolean(plan.consultationInPersonEligible),
+      badge: plan.badge,
       maxOffersVisible: plan.maxOffersVisible,
       maxChatsPerPost: plan.maxChatsPerPost,
       features: plan.features
@@ -626,15 +654,8 @@ class SubscriptionService {
       subscription = new Subscription({
         user: userId,
         plan: 'free',
-        planDetails: {
-          duration: freePlan.duration,
-          sellPosts: freePlan.sellPosts,
-          buyPosts: freePlan.buyPosts,
-          accessToBuyPosts: freePlan.accessToBuyPosts,
-          maxOffersVisible: freePlan.maxOffersVisible,
-          maxChatsPerPost: freePlan.maxChatsPerPost,
-          features: freePlan.features
-        },
+        planDetails: this.buildPlanDetails(freePlan),
+        consultationQuota: this.buildConsultationQuota(freePlan),
         status: 'active',
         startDate: new Date(),
         endDate: null, // Free plan never expires
@@ -664,26 +685,14 @@ class SubscriptionService {
 
     // Check if user has active subscription
     const currentSub = await this.getUserSubscription(userId);
-    
+
     // For free plan, just create it
     if (planName === 'free') {
       return this.getOrCreateFreeSubscription(userId);
     }
 
-    // Check user verification (level 2 for bank/Shaba)
-    const user = await User.findById(userId);
-    console.log('User level check:', {
-      userId,
-      level: user.level,
-      levelVerifications: user.levelVerifications
-    });
-    
-    if (user.level < 2) {
-      // Also check if level2 is approved in levelVerifications
-      if (!user.levelVerifications?.level2 || user.levelVerifications.level2.status !== 'approved') {
-        throw new Error('برای خرید اشتراک باید احراز هویت سطح 2 (شماره شبا) را تکمیل کنید');
-      }
-    }
+    // VIP and producer subscriptions are now purchasable by every user.
+    // Producer verification is handled by its own flow and must not block purchase.
 
     // Cancel current subscription if exists and not free
     if (currentSub && currentSub.plan !== 'free') {
@@ -745,15 +754,8 @@ class SubscriptionService {
           const subscription = new Subscription({
             user: userId,
             plan: plan.name,
-            planDetails: {
-              duration: plan.duration,
-              sellPosts: plan.sellPosts,
-              buyPosts: plan.buyPosts,
-              accessToBuyPosts: plan.accessToBuyPosts,
-              maxOffersVisible: plan.maxOffersVisible,
-              maxChatsPerPost: plan.maxChatsPerPost,
-              features: plan.features
-            },
+            planDetails: this.buildPlanDetails(plan),
+            consultationQuota: this.buildConsultationQuota(plan),
             status: 'pending',
             startDate: new Date(),
             endDate: plan.duration === 0 ? null :
@@ -807,21 +809,14 @@ class SubscriptionService {
 
   // Create subscription helper
   async createSubscription(userId, plan, paymentMethod) {
-    const endDate = plan.duration === 0 ? null : 
+    const endDate = plan.duration === 0 ? null :
       new Date(Date.now() + plan.duration * 24 * 60 * 60 * 1000);
-    
+
     const subscription = new Subscription({
       user: userId,
       plan: plan.name,
-      planDetails: {
-        duration: plan.duration,
-        sellPosts: plan.sellPosts,
-        buyPosts: plan.buyPosts,
-        accessToBuyPosts: plan.accessToBuyPosts,
-        maxOffersVisible: plan.maxOffersVisible,
-        maxChatsPerPost: plan.maxChatsPerPost,
-        features: plan.features
-      },
+      planDetails: this.buildPlanDetails(plan),
+      consultationQuota: this.buildConsultationQuota(plan),
       status: 'active',
       startDate: new Date(),
       endDate: endDate,
@@ -838,36 +833,12 @@ class SubscriptionService {
 
     await subscription.save();
 
-    // If producer plan, create/update producer profile
-    if (plan.name === 'producer') {
-      await this.createOrUpdateProducerProfile(userId);
-    }
+    // Producer profiles are created by the producer-verification flow, not at purchase time.
 
     return subscription;
   }
 
-  // Create or update producer profile
-  async createOrUpdateProducerProfile(userId) {
-    const Producer = require('../models/Producer');
-    let producer = await Producer.findOne({ user: userId });
-    
-    if (!producer) {
-      const user = await User.findById(userId);
-      producer = new Producer({
-        user: userId,
-        companyName: user.userType === 'company' ? user.companyInfo?.companyName : '',
-        contact: {
-          phone: user.phone,
-          email: user.email
-        },
-        status: 'active',
-        badge: 'bronze'
-      });
-      await producer.save();
-    }
-    
-    return producer;
-  }
+  // Producer profiles are intentionally created by the producer-verification flow.
 
   // Verify Zarinpal payment callback
   async verifyPayment(authority) {
@@ -908,6 +879,10 @@ class SubscriptionService {
           buyPostsUsed: 0,
           accessToBuyPostsUsed: 0
         };
+        if (!subscription.consultationQuota?.onlineIncludedMinutes) {
+          const verifiedPlan = this.getPlan(subscription.plan);
+          subscription.consultationQuota = this.buildConsultationQuota(verifiedPlan || subscription.planDetails || {});
+        }
         await subscription.save();
 
         if (transaction) {
@@ -942,9 +917,7 @@ class SubscriptionService {
           await transaction.save();
         }
 
-        if (subscription.plan === 'producer') {
-          await this.createOrUpdateProducerProfile(subscription.user);
-        }
+        // Producer profiles are created by the producer-verification flow, not at purchase time.
 
         logger.info('Subscription payment verified successfully', {
           subscriptionId: subscription._id,
@@ -1009,7 +982,7 @@ class SubscriptionService {
     }
 
     const currentPlan = this.getPlan(currentSub.plan);
-    
+
     // Calculate prorated amount
     const remainingDays = currentSub.remainingDays;
     const dailyRateCurrent = currentPlan.price / currentPlan.duration;
@@ -1035,15 +1008,8 @@ class SubscriptionService {
 
     // Update to new plan
     currentSub.plan = newPlan.name;
-    currentSub.planDetails = {
-      duration: newPlan.duration,
-      sellPosts: newPlan.sellPosts,
-      buyPosts: newPlan.buyPosts,
-      accessToBuyPosts: newPlan.accessToBuyPosts,
-      maxOffersVisible: newPlan.maxOffersVisible,
-      maxChatsPerPost: newPlan.maxChatsPerPost,
-      features: newPlan.features
-    };
+    currentSub.planDetails = this.buildPlanDetails(newPlan);
+    currentSub.consultationQuota = this.buildConsultationQuota(newPlan);
     currentSub.startDate = new Date();
     currentSub.endDate = newPlan.duration === 0 ? null :
       new Date(Date.now() + newPlan.duration * 24 * 60 * 60 * 1000);
@@ -1078,10 +1044,7 @@ class SubscriptionService {
       });
     }
 
-    // If upgrading to producer, create/update profile
-    if (newPlan.name === 'producer') {
-      await this.createOrUpdateProducerProfile(userId);
-    }
+    // Producer profiles are created by the producer-verification flow, not at upgrade time.
 
     return currentSub;
   }
@@ -1089,7 +1052,7 @@ class SubscriptionService {
   // Cancel subscription
   async cancel(userId) {
     const subscription = await this.getUserSubscription(userId);
-    
+
     if (!subscription || subscription.status !== 'active') {
       throw new Error('اشتراک فعالی یافت نشد');
     }
@@ -1111,7 +1074,7 @@ class SubscriptionService {
   // Check limits
   async checkLimits(userId) {
     const subscription = await this.getUserSubscription(userId);
-    
+
     if (!subscription || subscription.status !== 'active') {
       // Return free plan limits
       const freePlan = this.getPlan('free');
@@ -1164,18 +1127,18 @@ class SubscriptionService {
 async canAccessContact(userId) {
   // Get user's subscription (or free if none)
   const subscription = await this.getUserSubscription(userId);
-  
+
   // If no active subscription, use free plan
   if (!subscription || subscription.status !== 'active') {
     const freePlan = this.getPlan('free');
     const freeSub = await this.getOrCreateFreeSubscription(userId);
-    
+
     // Reset monthly usage if needed
     await this.resetMonthlyUsageIfNeeded(freeSub);
-    
+
     const used = freeSub.usage.accessToBuyPostsUsed || 0;
     const remaining = Math.max(0, freePlan.accessToBuyPosts - used);
-    
+
     return {
       canAccess: remaining > 0,
       remaining: remaining,
@@ -1203,7 +1166,7 @@ async canAccessContact(userId) {
 
   // Calculate base quota
   const baseQuota = subscription.planDetails.accessToBuyPosts;
-  
+
   // Calculate available extras (not used this month)
   const extras = subscription.extras
     .filter(e => e.type === 'access_posts' && e.amount > 0)
@@ -1214,11 +1177,11 @@ async canAccessContact(userId) {
       }
       return sum + e.amount;
     }, 0);
-    
+
   const totalAvailable = baseQuota + extras;
   const used = subscription.usage.accessToBuyPostsUsed || 0;
   const remaining = Math.max(0, totalAvailable - used);
-  
+
   return {
     canAccess: remaining > 0,
     remaining: remaining,
@@ -1234,19 +1197,19 @@ async canAccessContact(userId) {
 // Use contact access quota
 async useContactAccess(userId) {
   const subscription = await this.getUserSubscription(userId);
-  
+
   // If no subscription, create free one
   if (!subscription || subscription.status !== 'active') {
     const freePlan = this.getPlan('free');
     const freeSub = await this.getOrCreateFreeSubscription(userId);
-    
+
     // Reset monthly usage if needed
     await this.resetMonthlyUsageIfNeeded(freeSub);
-    
+
     if (freeSub.usage.accessToBuyPostsUsed >= freePlan.accessToBuyPosts) {
       throw new Error('سهمیه دسترسی به اطلاعات تماس شما به پایان رسیده است');
     }
-    
+
     freeSub.usage.accessToBuyPostsUsed += 1;
     await freeSub.save();
     return freeSub;
@@ -1264,33 +1227,33 @@ async useContactAccess(userId) {
 
   const baseQuota = subscription.planDetails.accessToBuyPosts;
   const used = subscription.usage.accessToBuyPostsUsed || 0;
-  
+
   // Try to use base quota first
   if (used < baseQuota) {
     subscription.usage.accessToBuyPostsUsed += 1;
     await subscription.save();
     return subscription;
   }
-  
+
   // Find an extra quota to use
-  const extraToUse = subscription.extras.find(e => 
-    e.type === 'access_posts' && e.amount > 0 && 
+  const extraToUse = subscription.extras.find(e =>
+    e.type === 'access_posts' && e.amount > 0 &&
     (!e.usedAt || new Date(e.usedAt) < new Date(subscription.usage.lastResetDate))
   );
-  
+
   if (extraToUse) {
     extraToUse.amount -= 1;
     extraToUse.usedAt = new Date();
-    
+
     if (extraToUse.amount === 0) {
       // Mark as fully used
       extraToUse.isUsed = true;
     }
-    
+
     await subscription.save();
     return subscription;
   }
-  
+
   throw new Error('سهمیه دسترسی به اطلاعات تماس شما به پایان رسیده است');
 }
 
@@ -1305,7 +1268,7 @@ async resetMonthlyUsageIfNeeded(subscription) {
   const now = new Date();
   const lastReset = new Date(subscription.usage.lastResetDate);
   const nextReset = new Date(lastReset);
-  
+
   // Reset monthly (30 days from last reset)
   nextReset.setMonth(nextReset.getMonth() + 1);
 
@@ -1313,7 +1276,7 @@ async resetMonthlyUsageIfNeeded(subscription) {
     // Reset base usage
     subscription.usage.accessToBuyPostsUsed = 0;
     subscription.usage.lastResetDate = now;
-    
+
     // Don't reset extras - they stay until used
     await subscription.save();
   }
@@ -1322,13 +1285,13 @@ async resetMonthlyUsageIfNeeded(subscription) {
 // Fix purchaseExtraQuota to add transaction properly
 async purchaseExtraQuota(userId, amount) {
   const subscription = await this.getUserSubscription(userId);
-  
+
   if (!subscription || subscription.status !== 'active') {
     throw new Error('اشتراک فعالی یافت نشد');
   }
 
   const price = QUOTA_PRICES.ACCESS_POSTS * amount;
-  
+
   const wallet = await Wallet.getOrCreateWallet(userId);
   if (!wallet.hasSufficientBalance(price, 'IRR')) {
     throw new Error('موجودی کیف پول کافی نیست');
@@ -1369,7 +1332,7 @@ async purchaseExtraQuota(userId, amount) {
   // Use sell post quota
   async useSellPostQuota(userId) {
     const subscription = await this.getUserSubscription(userId);
-    
+
     if (!subscription || subscription.status !== 'active') {
       // Free users can create unlimited posts
       return;
@@ -1382,7 +1345,7 @@ async purchaseExtraQuota(userId, amount) {
   // Use access to buy posts quota
   async useAccessQuota(userId) {
     const subscription = await this.getUserSubscription(userId);
-    
+
     if (!subscription || subscription.status !== 'active') {
       // Use free plan
       const freeSub = await this.getOrCreateFreeSubscription(userId);
@@ -1498,7 +1461,7 @@ async purchaseExtraQuota(userId, amount) {
       sub.status = 'expired';
       sub.notificationsSent.expired = true;
       await sub.save();
-      
+
       // Create free subscription
       await this.getOrCreateFreeSubscription(sub.user);
     }

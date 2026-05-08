@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Plus, RefreshCcw, Wallet as WalletIcon } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Button, Card, Input } from '../../components/ui';
@@ -22,6 +22,7 @@ const DEFAULT_FILTERS = {
 
 export default function Wallet() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
 
   const [summary, setSummary] = useState(null);
   const [ledger, setLedger] = useState([]);
@@ -62,9 +63,15 @@ export default function Wallet() {
     const status = searchParams.get('status');
     const amount = searchParams.get('amount');
     const error = searchParams.get('error');
+    const returnTo = searchParams.get('returnTo');
+    const safeReturnTo = returnTo?.startsWith('/dashboard/') ? returnTo : null;
 
     if (status === 'success') {
       toast.success(`کیف پول شما با موفقیت ${formatMoney(amount || 0)} شارژ شد`);
+      if (safeReturnTo) {
+        navigate(safeReturnTo, { replace: true });
+        return;
+      }
       window.history.replaceState({}, '', '/dashboard/wallet');
     }
 
@@ -78,6 +85,10 @@ export default function Wallet() {
       };
 
       toast.error(errorMessages[error] || 'خطا در شارژ کیف پول');
+      if (safeReturnTo) {
+        window.history.replaceState({}, '', `/dashboard/wallet?returnTo=${encodeURIComponent(safeReturnTo)}`);
+        return;
+      }
       window.history.replaceState({}, '', '/dashboard/wallet');
     }
   };
@@ -132,7 +143,7 @@ export default function Wallet() {
 
     setProcessingCharge(true);
     try {
-      const response = await userService.createWalletDeposit(amount);
+      const response = await userService.createWalletDeposit(amount, searchParams.get('returnTo'));
       const paymentUrl = response?.data?.paymentUrl;
 
       if (paymentUrl) {

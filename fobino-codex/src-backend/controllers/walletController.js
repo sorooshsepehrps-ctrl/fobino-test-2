@@ -20,13 +20,16 @@ exports.getBalance = asyncHandler(async (req, res) => {
 });
 
 exports.deposit = asyncHandler(async (req, res) => {
-  const { amount, gateway = 'zarinpal' } = req.body;
+  const { amount, gateway = 'zarinpal', returnTo } = req.body;
 
   if (!amount || Number(amount) < 10000) {
     return response.error(res, 'حداقل مبلغ شارژ ۱۰,۰۰۰ ریال است', 400);
   }
 
   const wallet = await Wallet.getOrCreateWallet(req.user._id);
+  const safeReturnTo = typeof returnTo === 'string' && returnTo.startsWith('/dashboard/')
+    ? returnTo
+    : null;
 
   const transaction = await ledgerService.recordWalletDepositInitiated({
     userId: req.user._id,
@@ -37,6 +40,7 @@ exports.deposit = asyncHandler(async (req, res) => {
       ip: req.ip,
       userAgent: req.get('user-agent'),
       source: 'walletController.deposit',
+      returnTo: safeReturnTo,
     },
   });
 
@@ -91,6 +95,10 @@ exports.verifyDeposit = asyncHandler(async (req, res) => {
     );
   }
 
+  const returnToQuery = transaction.metadata?.returnTo
+    ? `&returnTo=${encodeURIComponent(transaction.metadata.returnTo)}`
+    : '';
+
   if (Status !== 'OK') {
     await ledgerService.failWalletDeposit({
       transaction,
@@ -98,7 +106,7 @@ exports.verifyDeposit = asyncHandler(async (req, res) => {
     });
 
     return res.redirect(
-      `${process.env.CORS_ORIGIN}/dashboard/wallet?status=failed&error=cancelled`
+      `${process.env.CORS_ORIGIN}/dashboard/wallet?status=failed&error=cancelled${returnToQuery}`
     );
   }
 
@@ -111,7 +119,7 @@ exports.verifyDeposit = asyncHandler(async (req, res) => {
       });
 
       return res.redirect(
-        `${process.env.CORS_ORIGIN}/dashboard/wallet?status=failed&error=verification_failed`
+        `${process.env.CORS_ORIGIN}/dashboard/wallet?status=failed&error=verification_failed${returnToQuery}`
       );
     }
 
@@ -123,7 +131,7 @@ exports.verifyDeposit = asyncHandler(async (req, res) => {
       });
 
       return res.redirect(
-        `${process.env.CORS_ORIGIN}/dashboard/wallet?status=failed&error=wallet_not_found`
+        `${process.env.CORS_ORIGIN}/dashboard/wallet?status=failed&error=wallet_not_found${returnToQuery}`
       );
     }
 
@@ -140,7 +148,7 @@ exports.verifyDeposit = asyncHandler(async (req, res) => {
     return res.redirect(
       `${process.env.CORS_ORIGIN}/dashboard/wallet?status=success&amount=${Math.abs(
         transaction.amount
-      )}&refId=${result.refId}`
+      )}&refId=${result.refId}${returnToQuery}`
     );
   } catch (error) {
     logger.error('Wallet verify deposit error', {
@@ -154,7 +162,7 @@ exports.verifyDeposit = asyncHandler(async (req, res) => {
     });
 
     return res.redirect(
-      `${process.env.CORS_ORIGIN}/dashboard/wallet?status=failed&error=server_error`
+      `${process.env.CORS_ORIGIN}/dashboard/wallet?status=failed&error=server_error${returnToQuery}`
     );
   }
 });

@@ -5,6 +5,7 @@ const userAnalysisService = require('./userAnalysisService');
 const qrCodeService = require('./qrCodeService');
 const { NotFoundError } = require('../middleware/errorHandler');
 const { presentPublicUser, presentPublicSubscription, fullName, avatarOf } = require('../utils/presenters/publicUserPresenter');
+const { buildBadgesForUser } = require('../utils/presenters/userBadgePresenter');
 const reviewPresenter = require('../utils/presenters/reviewPresenter');
 
 function buildPublicProfileUrl(user) {
@@ -26,16 +27,17 @@ async function findUserByIdentifier(identifier) {
 async function getPublicProfileByIdentifier(identifier, viewerUserId = null) {
   const user = await findUserByIdentifier(identifier);
   const publicProfileUrl = buildPublicProfileUrl(user);
-  const [subscription, reviewSummary, reviewsPayload, analysis] = await Promise.all([
+  const [subscription, reviewSummary, reviewsPayload, analysis, badges] = await Promise.all([
     userAnalysisService.getActiveSubscriptionForUser(user._id),
     userReviewService.getReviewSummary(user._id),
     userReviewService.getUserReviews({ userId: user._id, page: 1, limit: 6 }),
-    userAnalysisService.getUserAnalysis(user._id)
+    userAnalysisService.getUserAnalysis(user._id),
+    buildBadgesForUser(user)
   ]);
 
   const qrCodeDataUrl = await qrCodeService.generateQrDataUrl(publicProfileUrl);
   return {
-    user: presentPublicUser(user),
+    user: presentPublicUser({ ...user, badges }),
     subscription: presentPublicSubscription(subscription),
     reviewSummary,
     recentReviews: reviewPresenter.presentReviewList(reviewsPayload.reviews),
@@ -49,9 +51,10 @@ async function getPublicProfileByIdentifier(identifier, viewerUserId = null) {
 async function getBusinessCardPayload(identifier) {
   const user = await findUserByIdentifier(identifier);
   const publicProfileUrl = buildPublicProfileUrl(user);
-  const [subscription, analysis] = await Promise.all([
+  const [subscription, analysis, badges] = await Promise.all([
     userAnalysisService.getActiveSubscriptionForUser(user._id),
-    userAnalysisService.getUserAnalysis(user._id)
+    userAnalysisService.getUserAnalysis(user._id),
+    buildBadgesForUser(user)
   ]);
   const qrCodeDataUrl = await qrCodeService.generateQrDataUrl(publicProfileUrl);
   return {
@@ -62,6 +65,7 @@ async function getBusinessCardPayload(identifier) {
     averageRating: user.reviewStats?.averageRating || 0,
     reviewsCount: user.reviewStats?.reviewsCount || 0,
     subscription: presentPublicSubscription(subscription),
+    badges,
     publicProfileUrl,
     qrCodeDataUrl
   };
