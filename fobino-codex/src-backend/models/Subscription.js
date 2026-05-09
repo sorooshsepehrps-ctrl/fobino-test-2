@@ -169,8 +169,8 @@ subscriptionSchema.statics.getActiveForUser = function(userId) {
   return this.findOne({
     user: userId,
     status: 'active',
-    endDate: { $gt: new Date() }
-  }).sort({ endDate: -1 });
+    $or: [{ endDate: { $gt: new Date() } }, { endDate: null }]
+  }).sort({ endDate: -1, createdAt: -1 });
 };
 
 subscriptionSchema.statics.hasActiveProducerSubscription = async function(userId) {
@@ -178,7 +178,7 @@ subscriptionSchema.statics.hasActiveProducerSubscription = async function(userId
     user: userId,
     plan: 'producer',
     status: 'active',
-    endDate: { $gt: new Date() }
+    $or: [{ endDate: { $gt: new Date() } }, { endDate: null }]
   }).select('_id');
 
   return Boolean(subscription);

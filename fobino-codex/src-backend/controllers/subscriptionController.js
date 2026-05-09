@@ -146,19 +146,18 @@ exports.purchaseContactQuota = asyncHandler(async (req, res) => {
 // @route   POST /api/subscriptions/quota
 // @access  Private
 exports.purchaseExtra = asyncHandler(async (req, res) => {
-  const { type, amount } = req.body;
-  if (!['sell_posts', 'access_posts'].includes(type)) {
-    return response.error(res, 'نوع سهمیه نامعتبر است', 400);
+  const type = req.body.type || req.body.quotaType || 'access_posts';
+  const amount = Number(req.body.amount || 0);
+
+  if (!Number.isInteger(amount) || amount < 1) {
+    return response.error(res, 'تعداد سهمیه باید حداقل ۱ باشد', 400);
   }
-  
-  // For access_posts, use the new method
-  if (type === 'access_posts') {
-    const subscription = await subscriptionService.purchaseExtraQuota(req.user._id, amount);
-    return response.success(res, { subscription }, 'سهمیه اضافی خریداری شد');
+
+  if (type !== 'access_posts') {
+    return response.error(res, 'در حال حاضر فقط خرید سهمیه دسترسی به اطلاعات تماس پشتیبانی می‌شود', 400);
   }
-  
-  // For sell_posts (legacy support)
-  const subscription = await subscriptionService.purchaseExtraQuota(req.user._id, type, amount);
+
+  const subscription = await subscriptionService.purchaseExtraQuota(req.user._id, amount);
   return response.success(res, { subscription }, 'سهمیه اضافی خریداری شد');
 });
 

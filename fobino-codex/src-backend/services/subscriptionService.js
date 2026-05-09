@@ -51,6 +51,21 @@ async function markSubscriptionGatewayTransactionFailed(transaction, reason) {
 }
 
 
+async function notifySubscriptionPurchasedSafely(userId, plan, subscriptionId) {
+  try {
+    await notificationService.notifySubscriptionPurchased(
+      userId,
+      plan?.nameFa || plan?.name || 'فعال',
+      subscriptionId
+    );
+  } catch (error) {
+    logger.warn('Subscription purchase notification failed', {
+      userId,
+      subscriptionId,
+      error: error.message,
+    });
+  }
+}
 
 class SubscriptionService {
   buildPlanDetails(plan) {
@@ -108,11 +123,12 @@ class SubscriptionService {
 
   // Get user's active subscription with monthly reset tracking
   async getUserSubscription(userId) {
+    const now = new Date();
     const subscription = await Subscription.findOne({
       user: userId,
       status: 'active',
-      endDate: { $gt: new Date() }
-    });
+      $or: [{ endDate: { $gt: now } }, { endDate: null }]
+    }).sort({ endDate: -1, createdAt: -1 });
 
     if (!subscription) {
       // Check for any subscription
@@ -121,17 +137,7 @@ class SubscriptionService {
       return anySubscription;
     }
 
-    // Reset monthly usage if needed
-    const now = new Date();
-    const lastReset = subscription.usage.lastResetDate || subscription.startDate;
-    const resetDate = new Date(lastReset);
-    resetDate.setMonth(resetDate.getMonth() + 1);
-
-    if (now > resetDate) {
-      subscription.usage.accessToBuyPostsUsed = 0;
-      subscription.usage.lastResetDate = now;
-      await subscription.save();
-    }
+    await this.resetMonthlyUsageIfNeeded(subscription);
 
     return subscription;
   }
@@ -226,6 +232,8 @@ class SubscriptionService {
           source: 'subscriptionService.purchase.wallet',
         },
       });
+
+      await notifySubscriptionPurchasedSafely(userId, plan, subscription._id);
 
       return subscription;
     }
@@ -409,6 +417,9 @@ class SubscriptionService {
           };
           await transaction.save();
         }
+
+        const verifiedPlan = this.getPlan(subscription.plan) || { name: subscription.plan, nameFa: subscription.plan };
+        await notifySubscriptionPurchasedSafely(subscription.user, verifiedPlan, subscription._id);
 
         // Producer profiles are created by the producer-verification flow, not at purchase time.
 

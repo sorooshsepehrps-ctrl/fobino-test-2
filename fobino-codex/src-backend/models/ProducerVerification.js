@@ -96,14 +96,20 @@ producerVerificationSchema.methods.recalculatePublicLevel = function recalculate
   const l1 = this.levels?.level1?.status === 'approved';
   const l2 = this.levels?.level2?.status === 'approved';
   const l3 = this.levels?.level3?.status === 'approved';
+  const statuses = [
+    this.levels?.level1?.status,
+    this.levels?.level2?.status,
+    this.levels?.level3?.status,
+  ].filter(Boolean);
 
   this.publicLevel = l3 ? 3 : l2 ? 2 : l1 ? 1 : 0;
 
-  if (this.publicLevel === 3) this.overallStatus = 'verified_level_3';
+  if (statuses.some((status) => ['pending', 'revision_pending', 'visited'].includes(status))) this.overallStatus = 'pending_review';
+  else if (statuses.includes('rejected')) this.overallStatus = 'rejected';
+  else if (this.publicLevel === 3) this.overallStatus = 'verified_level_3';
   else if (this.publicLevel === 2) this.overallStatus = 'verified_level_2';
   else if (this.publicLevel === 1) this.overallStatus = 'verified_level_1';
-  else if (['pending', 'revision_pending'].includes(this.levels?.level1?.status)) this.overallStatus = 'pending_review';
-  else if (this.levels?.level1?.status && this.levels.level1.status !== 'not_started') this.overallStatus = 'in_progress';
+  else if (statuses.some((status) => !['not_started', 'locked'].includes(status))) this.overallStatus = 'in_progress';
   else this.overallStatus = 'not_started';
 
   if (this.publicLevel >= 1 && this.levels.level2.status === 'locked') this.levels.level2.status = 'not_started';

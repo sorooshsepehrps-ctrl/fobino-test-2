@@ -24,13 +24,20 @@ class NotificationService {
   // Create notification from template
   async createFromTemplate(userId, templateName, templateData, data = {}, actionUrl = null) {
     const templates = Notification.templates;
+    const normalizedTemplateName = this.normalizeTemplateName(templateName);
+    const templateFactory = templates[templateName] || templates[normalizedTemplateName];
     
-    if (!templates[templateName]) {
+    if (!templateFactory) {
       throw new Error(`Template ${templateName} not found`);
     }
 
-    const template = templates[templateName](templateData);
+    const template = templateFactory(templateData);
     return this.create(userId, templateName, template.title, template.message, data, actionUrl);
+  }
+
+  normalizeTemplateName(templateName) {
+    if (!templateName || !templateName.includes('_')) return templateName;
+    return templateName.replace(/_([a-z])/g, (_, char) => char.toUpperCase());
   }
 
   // Send push notification (placeholder for future implementation)
@@ -202,6 +209,52 @@ class NotificationService {
       reason,
       {},
       '/profile/verification'
+    );
+  }
+
+
+  async notifySubscriptionPurchased(userId, planName, subscriptionId) {
+    return this.create(
+      userId,
+      'system',
+      'اشتراک فعال شد',
+      `اشتراک ${planName} شما با موفقیت فعال شد`,
+      { extra: { subscriptionId, planName } },
+      '/dashboard/subscription'
+    );
+  }
+
+  async notifyProducerVerificationStatus(userId, { level, action, reason }) {
+    const isApproved = action === 'approve';
+    const isResubmit = action === 'request_resubmit';
+    const title = isApproved
+      ? 'سطح احراز تولیدکننده تایید شد'
+      : isResubmit
+        ? 'اصلاح احراز تولیدکننده لازم است'
+        : 'سطح احراز تولیدکننده رد شد';
+    const message = isApproved
+      ? `سطح ${level} احراز تولیدکننده شما تایید شد`
+      : `${isResubmit ? 'برای ادامه احراز تولیدکننده اصلاحات لازم است' : `سطح ${level} احراز تولیدکننده شما رد شد`}${reason ? `: ${reason}` : ''}`;
+
+    return this.create(
+      userId,
+      isApproved ? 'verification_approved' : 'verification_rejected',
+      title,
+      message,
+      { extra: { level, action, reason } },
+      '/dashboard/producer-verification'
+    );
+  }
+
+  async notifyProducerVisitScheduled(userId, { scheduledAt }) {
+    const scheduledLabel = scheduledAt ? new Date(scheduledAt).toLocaleString('fa-IR') : 'زمان تعیین‌شده';
+    return this.create(
+      userId,
+      'system',
+      'بازدید حضوری تولیدی زمان‌بندی شد',
+      `بازدید حضوری احراز تولیدکننده برای ${scheduledLabel} زمان‌بندی شد`,
+      { extra: { scheduledAt } },
+      '/dashboard/producer-verification'
     );
   }
 

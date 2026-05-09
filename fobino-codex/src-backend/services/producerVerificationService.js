@@ -2,6 +2,8 @@ const ProducerVerification = require('../models/ProducerVerification');
 const Subscription = require('../models/Subscription');
 const User = require('../models/User');
 const fileUploadService = require('./fileUploadService');
+const notificationService = require('./notificationService');
+const logger = require('../utils/logger');
 
 const LEVEL_MAP = { 1: 'level1', 2: 'level2', 3: 'level3' };
 
@@ -81,10 +83,42 @@ function validateLevel3(verification) {
   }
 }
 
+
+async function notifyProducerReviewSafely(verification, payload) {
+  try {
+    await notificationService.notifyProducerVerificationStatus(verification.user, payload);
+  } catch (error) {
+    logger.warn('Producer verification notification failed', {
+      userId: verification.user,
+      verificationId: verification._id,
+      action: payload.action,
+      error: error.message,
+    });
+  }
+}
+
+async function notifyProducerVisitSafely(verification, scheduledAt) {
+  try {
+    await notificationService.notifyProducerVisitScheduled(verification.user, { scheduledAt });
+  } catch (error) {
+    logger.warn('Producer verification visit notification failed', {
+      userId: verification.user,
+      verificationId: verification._id,
+      error: error.message,
+    });
+  }
+}
+
 async function updateUserProducerStatus(verification) {
-  await User.findByIdAndUpdate(verification.user, {
-    producerVerificationStatus: verification.publicLevel > 0 ? 'verified' : verification.overallStatus === 'pending_review' ? 'pending' : 'none',
-  });
+  const producerVerificationStatus = verification.publicLevel > 0
+    ? 'verified'
+    : verification.overallStatus === 'pending_review'
+      ? 'pending'
+      : verification.overallStatus === 'rejected'
+        ? 'rejected'
+        : 'none';
+
+  await User.findByIdAndUpdate(verification.user, { producerVerificationStatus });
 }
 
 class ProducerVerificationService {
@@ -238,6 +272,13 @@ class ProducerVerificationService {
     verification.recalculatePublicLevel();
     await verification.save();
     await updateUserProducerStatus(verification);
+
+    if (['approve', 'reject', 'request_resubmit'].includes(action)) {
+      await notifyProducerReviewSafely(verification, { level, action, reason });
+    } else if (action === 'schedule') {
+      await notifyProducerVisitSafely(verification, target.scheduledAt);
+    }
+
     return verification;
   }
 
