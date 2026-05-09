@@ -87,8 +87,8 @@ export const userService = {
     return response.data;
   },
 
-  async createWalletDeposit(amount) {
-    const response = await api.post('/wallet/deposit', { amount });
+  async createWalletDeposit(amount, returnTo = null) {
+    const response = await api.post('/wallet/deposit', { amount, returnTo });
     return response.data;
   },
 

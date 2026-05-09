@@ -1,5 +1,6 @@
 import { MapPin, ShieldCheck } from 'lucide-react';
 import { getUserAvatar, getUserDisplayName } from '../../../utils/marketplace';
+import UserTrustBadges from '../../common/UserTrustBadges';
 
 export default function PosterInfo({ user, meta = '', compact = false }) {
   return (
@@ -21,6 +22,8 @@ export default function PosterInfo({ user, meta = '', compact = false }) {
             </span>
           ) : null}
         </div>
+
+        <UserTrustBadges badges={user?.badges} compact className="mt-1" />
 
         {meta ? (
           <p className="mt-1 flex items-center gap-1 text-xs font-medium text-slate-500">

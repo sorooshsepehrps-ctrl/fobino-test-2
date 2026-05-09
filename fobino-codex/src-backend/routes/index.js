@@ -10,6 +10,7 @@ router.use('/conversations', require('./conversations'));
 router.use('/offers', require('./offers'));
 router.use('/deals', require('./deals'));
 router.use('/subscriptions', require('./subscriptions'));
+router.use('/producer-verification', require('./producerVerification'));
 router.use('/wallet', require('./wallet'));
 router.use('/disputes', require('./disputes'));
 router.use('/tickets', require('./tickets'));

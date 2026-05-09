@@ -124,7 +124,7 @@ export default function PublicUserProfile() {
               </div>
             </div>
 
-            <PublicUserSubscriptionCard subscription={profile?.subscription} />
+            <PublicUserSubscriptionCard subscription={profile?.subscription} badges={profile?.user?.badges} />
             <PublicUserReviewSection
               profile={profile}
               onReviewsChange={(reviews) => setProfile((prev) => ({ ...prev, recentReviews: reviews }))}

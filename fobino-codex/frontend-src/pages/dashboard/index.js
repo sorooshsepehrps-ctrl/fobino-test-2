@@ -1,6 +1,7 @@
 export { default as MyFobino } from './MyFobino';
 export { default as Profile } from './Profile';
 export { default as Subscription } from './Subscription';
+export { default as ProducerVerification } from './ProducerVerification';
 export { default as Verification } from './Verification';
 export { default as Wallet } from './Wallet';
 export { default as Tickets } from './Tickets';

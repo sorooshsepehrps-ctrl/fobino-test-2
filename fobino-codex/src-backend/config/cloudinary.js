@@ -1,4 +1,5 @@
 const cloudinary = require('cloudinary').v2;
+const { Readable } = require('stream');
 const logger = require('../utils/logger');
 
 cloudinary.config({
@@ -50,6 +51,36 @@ const uploadDocument = async (file, folder = 'fobino/documents') => {
     throw error;
   }
 };
+
+const uploadBuffer = (buffer, folder = 'fobino', resourceType = 'auto', options = {}) => {
+  return new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        folder,
+        resource_type: resourceType,
+        ...options
+      },
+      (error, result) => {
+        if (error) {
+          logger.error('Cloudinary buffer upload error:', error);
+          reject(error);
+          return;
+        }
+
+        resolve({
+          url: result.secure_url,
+          publicId: result.public_id,
+          format: result.format,
+          width: result.width,
+          height: result.height
+        });
+      }
+    );
+
+    Readable.from(buffer).pipe(uploadStream);
+  });
+};
+
 const deleteImage = async (publicId)=>{
   try{
     const result = await cloudinary.uploader.destroy(publicId);
@@ -99,6 +130,7 @@ module.exports ={
   cloudinary,
   uploadImage,
   uploadDocument,
+  uploadBuffer,
   deleteImage,
   getSignedUrl
 }

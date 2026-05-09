@@ -126,6 +126,32 @@ const uploadVerificationDocs = multer({
   { name: 'bankCardImage', maxCount: 1 }
 ]);
 
+
+// Producer verification uploads
+const uploadProducerLevelOnePhotos = multer({
+  storage: memoryStorage,
+  limits: {
+    fileSize: SYSTEM.MAX_FILE_SIZE,
+    files: 10
+  },
+  fileFilter: imageFilter
+}).fields([
+  { name: 'photos', maxCount: 10 },
+  { name: 'images', maxCount: 10 }
+]);
+
+const uploadProducerLevelTwoDocuments = multer({
+  storage: memoryStorage,
+  limits: {
+    fileSize: SYSTEM.MAX_FILE_SIZE,
+    files: 10
+  },
+  fileFilter: documentFilter
+}).fields([
+  { name: 'documents', maxCount: 10 },
+  { name: 'licenses', maxCount: 5 }
+]);
+
 // Chat attachments upload
 const uploadChatAttachment = multer({
   storage: memoryStorage,
@@ -207,6 +233,8 @@ module.exports = {
   uploadMultipleDocuments: handleUploadError(uploadMultipleDocuments),
   uploadProfileImage: handleUploadError(uploadProfileImage),
   uploadVerificationDocs: handleUploadError(uploadVerificationDocs),
+  uploadProducerLevelOnePhotos: handleUploadError(uploadProducerLevelOnePhotos),
+  uploadProducerLevelTwoDocuments: handleUploadError(uploadProducerLevelTwoDocuments),
   uploadChatAttachment: handleUploadError(uploadChatAttachment),
   uploadMarketingRequest: handleUploadError(uploadMarketingRequest)
 };

@@ -9,3 +9,4 @@ export { default as socketService } from './socketService';
 export { default as dealService } from './dealService';
 export { default as marketingService } from './marketingService';
 export { default as dropshippingService } from './dropshippingService';
+export { default as producerVerificationService } from './producerVerificationService';

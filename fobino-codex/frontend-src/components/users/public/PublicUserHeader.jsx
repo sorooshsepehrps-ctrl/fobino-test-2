@@ -2,6 +2,7 @@ import { CalendarDays, MapPin, QrCode, ShieldCheck, Sparkles, Store, UserRound }
 import UserGradeBadge from '../analysis/UserGradeBadge';
 import RatingStars from '../../reviews/RatingStars';
 import CreateChatButton from './CreateChatButton';
+import UserTrustBadges from '../../common/UserTrustBadges';
 
 const avatarUrl = (avatar) => typeof avatar === 'string' ? avatar : avatar?.url || avatar?.secure_url || '';
 const firstLetter = (value) => (value || 'فوبینو').trim().slice(0, 1).toUpperCase();
@@ -38,6 +39,7 @@ export default function PublicUserHeader({ profile, onOpenBusinessCard }) {
               <h1 className="text-3xl font-black leading-tight md:text-5xl">{title}</h1>
               <UserGradeBadge grade={analysis.grade} />
             </div>
+            <UserTrustBadges badges={user.badges} className="mt-3" />
             <div className="mt-3 flex flex-wrap items-center gap-2 text-emerald-50">
               {user.fullName && user.fullName !== title && <TrustPill icon={UserRound}>{user.fullName}</TrustPill>}
               {user.businessName && <TrustPill icon={Store}>کسب‌وکار تأییدپذیر</TrustPill>}
